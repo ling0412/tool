@@ -1,0 +1,12 @@
+[package]
+name = "inofd" 
+version = "0.1.0" 
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] } 
+# 替换 walkdir
+jwalk = "0.8" 
+rayon = "1.8" 
+# 用于获取逻辑 CPU 核心数，以便设置 Rayon 线程池
+num_cpus = "1.16"
