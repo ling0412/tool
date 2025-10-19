@@ -1,6 +1,6 @@
 [package]
 name = "inofd" 
-version = "0.1.0" 
+version = "0.2.0" 
 edition = "2021"
 
 [dependencies]
@@ -10,3 +10,5 @@ jwalk = "0.8"
 rayon = "1.8" 
 # 用于获取逻辑 CPU 核心数，以便设置 Rayon 线程池
 num_cpus = "1.16"
+fiemap = "0.2"       # 用于获取文件 Extent 映射
+nix = { version = "0.27", features = ["ioctl", "fs"] } # 用于检查 Btrfs 文件系统类型
