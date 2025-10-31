@@ -9,18 +9,22 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
-# --- 1. Wine/Proton 版本配置 ---
-WINE_COMMANDS = {
-    "系统 Proton-GE": "proton-ge", 
-    "系统 Wine": "wine",
+# --- 1. UMU/Proton 版本配置 (对应 PROTONPATH 参数) ---
+# 这些值将作为 PROTONPATH 环境变量的值
+PROTON_PATHS = {
+    "GE-Proton": "GE-Proton",  
+    "UMU-Proton": "UMU-Proton",
+    "自定义": "", # 选择“自定义”时，使用 custom_proton_path_input 的值
 }
 
-# --- 2. 配置保存/加载文件名 ---
+# --- 2. WINEPREFIX 路径预设 ---
+HOME_DIR = os.path.expanduser("~")
+DEFAULT_GLOBAL_PFX = os.path.join(HOME_DIR, ".local", "share", "proton-pfx", "0")
+
+# --- 3. 配置保存/加载文件名 ---
 CONFIG_DIR_NAME = "startgame"
 CONFIG_FILE_NAME = "config.json"
-# 路径定义常量
-WINE_PFX_DIR_NAME = "wine"
-PROTON_COMPAT_DIR_NAME = "proton"
+LOCAL_PFX_DIR_NAME = "proton/pfx" # 启动目录下的 WINEPREFIX 相对路径
 
 class CustomLauncher(QWidget):
     def __init__(self, exe_path):
@@ -29,10 +33,10 @@ class CustomLauncher(QWidget):
         self.game_dir = os.path.dirname(exe_path)
         self.config_path = os.path.join(self.game_dir, CONFIG_DIR_NAME, CONFIG_FILE_NAME)
         
-        self.setWindowTitle(f"Qt 游戏启动器配置: {os.path.basename(exe_path)}")
+        self.setWindowTitle(f"Umu 启动器: {os.path.basename(exe_path)}")
         self.setMinimumWidth(800)
         
-        # 1. 初始化所有UI组件，创建所有对象
+        # 1. 初始化所有UI组件
         self.init_ui() 
         
         # 2. 绑定事件 (在设置初始状态之前绑定)
@@ -40,49 +44,51 @@ class CustomLauncher(QWidget):
         
         # 3. 加载并设置初始状态
         self.load_config()
-        # 初始化互斥开关的状态
-        self.handle_wine_proton_switch(self.wine_combo.currentText()) 
-        # 互斥逻辑初始化（先处理 Wine FSR 组，再处理 Gamescope）
-        self.handle_wine_fsr_switch(self.wine_fsr_checkbox.isChecked()) 
-        self.handle_wine_fake_res_switch(self.wine_fake_res_checkbox.isChecked())
-        self.handle_gamescope_switch(self.gamescope_checkbox.isChecked()) 
         
+        # 4. 初始化互斥和依赖开关的状态
+        self.handle_proton_path_switch(self.proton_combo.currentText()) 
+        self.handle_proton_fsr_switch(self.proton_fsr_checkbox.isChecked())
+        self.handle_gamescope_switch(self.gamescope_checkbox.isChecked())
         self.update_command_preview()
 
     def init_ui(self):
         main_layout = QVBoxLayout()
 
-        # --- 兼容层选择和 WINEPREFIX 组 ---
-        top_group = QGroupBox("兼容层与环境配置")
+        # --- Umu/Proton 路径配置组 ---
+        top_group = QGroupBox("Umu/Proton 路径与环境配置")
         top_layout = QGridLayout(top_group)
 
-        # 兼容层选择
-        wine_label = QLabel("选择兼容层命令:")
-        self.wine_combo = QComboBox()
-        self.wine_combo.addItems(WINE_COMMANDS.keys())
-        self.wine_combo.setCurrentText("系统 Proton-GE") 
-        top_layout.addWidget(wine_label, 0, 0)
-        top_layout.addWidget(self.wine_combo, 0, 1)
+        # 1. PROTONPATH 选择 (GE-Proton, UMU-Proton, 自定义)
+        proton_path_label = QLabel("PROTONPATH 预设值:")
+        self.proton_combo = QComboBox()
+        self.proton_combo.addItems(PROTON_PATHS.keys())
+        self.proton_combo.setCurrentText("GE-Proton") 
+        top_layout.addWidget(proton_path_label, 0, 0)
+        top_layout.addWidget(self.proton_combo, 0, 1)
+
+        # 2. 自定义 PROTONPATH 输入框
+        custom_proton_path_label = QLabel("自定义 PROTONPATH:")
+        self.custom_proton_path_input = QLineEdit("")
+        self.custom_proton_path_input.setPlaceholderText("例如: /path/to/my/Proton-8.0-3")
+        self.custom_proton_path_input.setEnabled(False) 
+        top_layout.addWidget(custom_proton_path_label, 1, 0)
+        top_layout.addWidget(self.custom_proton_path_input, 1, 1)
         
-        # WINEPREFIX 复选框
-        self.wine_prefix_checkbox = QCheckBox(f"使用启动路径 WINEPREFIX ({CONFIG_DIR_NAME}/{WINE_PFX_DIR_NAME})")
-        self.wine_prefix_checkbox.setChecked(False) 
-        top_layout.addWidget(self.wine_prefix_checkbox, 1, 0, 1, 2)
-        
-        # STEAM_COMPAT_DATA_PATH 复选框
-        self.steam_compat_checkbox = QCheckBox(f"使用启动路径 Proton 路径 ({CONFIG_DIR_NAME}/{PROTON_COMPAT_DIR_NAME})")
-        self.steam_compat_checkbox.setChecked(False)
-        top_layout.addWidget(self.steam_compat_checkbox, 2, 0, 1, 2)
-        
+        # 3. WINEPREFIX 路径选择
+        self.wine_pfx_checkbox = QCheckBox(f"使用启动目录 ./{CONFIG_DIR_NAME}/{LOCAL_PFX_DIR_NAME}")
+        self.wine_pfx_checkbox.setChecked(False) 
+        top_layout.addWidget(QLabel(f"WINEPREFIX: 默认路径 {DEFAULT_GLOBAL_PFX}"), 2, 0)
+        top_layout.addWidget(self.wine_pfx_checkbox, 2, 1)
+
         main_layout.addWidget(top_group)
         
         # --- 环境变量和参数配置组 ---
         env_group = QGroupBox("启动参数")
         env_layout = QVBoxLayout(env_group)
         
-        # 环境变量输入
+        # 额外环境变量输入
         env_input_layout = QHBoxLayout()
-        env_label = QLabel("额外环境变量 (自定义):")
+        env_label = QLabel("额外环境变量:")
         self.env_input = QLineEdit("") 
         env_input_layout.addWidget(env_label)
         env_input_layout.addWidget(self.env_input)
@@ -96,11 +102,39 @@ class CustomLauncher(QWidget):
         args_input_layout.addWidget(self.args_input)
         env_layout.addLayout(args_input_layout)
         
-        # --- 快速开关复选框 ---
-        quick_config_layout = QGridLayout() # 使用网格布局来容纳更多复选框
+        # --- UMU 专用参数 (GAMEID, STORE, pf_tricks) ---
+        umu_params_group = QGroupBox("Umu 专用参数")
+        umu_params_layout = QGridLayout(umu_params_group)
         
-        # 第一行
-        self.mangohud_checkbox = QCheckBox("启用 MangoHud/MangoApp")
+        # GAMEID (默认值修改为 0)
+        gameid_label = QLabel("GAMEID (默认 0):")
+        self.gameid_input = QLineEdit("0")
+        self.gameid_input.setPlaceholderText("umu-id")
+        
+        store_label = QLabel("STORE:")
+        self.store_input = QLineEdit("")
+        self.store_input.setPlaceholderText("例如: gog / egs / itchio")
+        
+        # 新增 -pf_tricks 输入框
+        # 提示修改为：将被放置在命令末尾
+        pf_trick_label = QLabel("-pf_tricks (逗号分隔, 例: x,y, 将被放置在命令末尾):")
+        self.pf_tricks_input = QLineEdit("")
+        self.pf_tricks_input.setPlaceholderText("如: d3dcompiler_47, mf")
+
+        umu_params_layout.addWidget(gameid_label, 0, 0)
+        umu_params_layout.addWidget(self.gameid_input, 0, 1)
+        umu_params_layout.addWidget(store_label, 1, 0)
+        umu_params_layout.addWidget(self.store_input, 1, 1)
+        umu_params_layout.addWidget(pf_trick_label, 2, 0) # 新增
+        umu_params_layout.addWidget(self.pf_tricks_input, 2, 1) # 新增
+        
+        env_layout.addWidget(umu_params_group)
+        
+        # --- 快速开关复选框 (Proton 专用) ---
+        quick_config_group = QGroupBox("快速开关")
+        quick_config_layout = QGridLayout(quick_config_group)
+        
+        self.mangohud_checkbox = QCheckBox("启用 MangoHud/MangoApp (MANGOHUD=1)")
         self.mangohud_checkbox.setChecked(True) 
         quick_config_layout.addWidget(self.mangohud_checkbox, 0, 0)
 
@@ -111,28 +145,30 @@ class CustomLauncher(QWidget):
         self.winedll_checkbox.setChecked(False) 
         quick_config_layout.addWidget(self.winedll_checkbox, 0, 2)
 
-        self.proton_wayland_checkbox = QCheckBox("PROTON_ENABLE_WAYLAND=1")
+        self.proton_wayland_checkbox = QCheckBox("启用实验性Wayland驱动")
         self.proton_wayland_checkbox.setChecked(False)
-        self.proton_wayland_checkbox.setEnabled(False) # 默认禁用
         quick_config_layout.addWidget(self.proton_wayland_checkbox, 1, 0)
 
         self.proton_hdr_checkbox = QCheckBox("PROTON_ENABLE_HDR=1")
         self.proton_hdr_checkbox.setChecked(False)
-        self.proton_hdr_checkbox.setEnabled(False) # 默认禁用
         quick_config_layout.addWidget(self.proton_hdr_checkbox, 1, 1)
         
-        env_layout.addLayout(quick_config_layout)
+        # 新增 PROTON_VERB=runinprefix 选项
+        self.proton_verb_checkbox = QCheckBox("PROTON_VERB=runinprefix")
+        self.proton_verb_checkbox.setChecked(False)
+        quick_config_layout.addWidget(self.proton_verb_checkbox, 1, 2)
+        
+        env_layout.addWidget(quick_config_group)
         main_layout.addWidget(env_group)
         
-        # --- 缩放配置组 (Gamescope 和 Wine FSR 互斥) ---
-        scaling_group = QGroupBox("缩放与窗口配置 (Gamescope/Wine FSR 互斥)")
+        # --- 缩放配置组 (Gamescope 和 Proton FSR 互斥) ---
+        scaling_group = QGroupBox("缩放与窗口配置 (Gamescope/Proton FSR 互斥)")
         scaling_layout = QVBoxLayout(scaling_group)
 
         # 1. Gamescope 配置
         self.gamescope_group = QGroupBox("Gamescope 配置")
         gamescope_layout = QGridLayout(self.gamescope_group)
         
-        # Gamescope 主复选框 + 折叠按钮
         gs_header_layout = QHBoxLayout()
         self.gamescope_checkbox = QCheckBox("启用 gamescope 启动器")
         self.gamescope_checkbox.setChecked(False)
@@ -140,23 +176,20 @@ class CustomLauncher(QWidget):
         
         self.gs_collapse_btn = QPushButton("▼ 展开配置")
         self.gs_collapse_btn.setMaximumWidth(120)
-        self.gs_collapse_btn.setEnabled(True) 
         gs_header_layout.addWidget(self.gs_collapse_btn)
         gs_header_layout.addStretch()
         
         gamescope_layout.addLayout(gs_header_layout, 0, 0, 1, 4)
         
-        # 可折叠的配置内容容器
         self.gs_config_widget = QWidget()
         gs_config_layout = QGridLayout(self.gs_config_widget)
         gs_config_layout.setContentsMargins(20, 0, 0, 0)
         
-        # 分辨率输入
         res_label = QLabel("目标分辨率 (w x h) / 输出分辨率 (W x H):")
         self.w_input = QLineEdit("1920")
         self.h_input = QLineEdit("1080")
-        self.W_input = QLineEdit("3840") # 4K 默认值
-        self.H_input = QLineEdit("2160") # 4K 默认值
+        self.W_input = QLineEdit("3840") 
+        self.H_input = QLineEdit("2160") 
         
         res_row_layout = QHBoxLayout()
         res_row_layout.addWidget(QLabel("-w"))
@@ -171,7 +204,6 @@ class CustomLauncher(QWidget):
         gs_config_layout.addWidget(res_label, 0, 0, 1, 4)
         gs_config_layout.addLayout(res_row_layout, 1, 0, 1, 4)
 
-        # Gamescope FSR 复选框
         self.fsr_checkbox = QCheckBox("启用 Gamescope FSR 1.0 (-F fsr)")
         gs_config_layout.addWidget(self.fsr_checkbox, 2, 0, 1, 2)
         
@@ -180,16 +212,14 @@ class CustomLauncher(QWidget):
         scaling_layout.addWidget(self.gamescope_group)
 
 
-        # 2. Wine/Proton FSR 配置 
-        wine_fsr_group = QGroupBox("Wine/Proton FSR (WINE_FULLSCREEN_FSR)")
-        wine_fsr_layout = QGridLayout(wine_fsr_group)
+        # 2. Proton FSR 配置 
+        proton_fsr_group = QGroupBox("Proton FSR (WINE_FULLSCREEN_FSR)")
+        proton_fsr_layout = QGridLayout(proton_fsr_group)
         
-        # Wine FSR 主开关
-        self.wine_fsr_checkbox = QCheckBox("启用 Wine/Proton FSR 缩放 (WINE_FULLSCREEN_FSR=1)")
-        self.wine_fsr_checkbox.setChecked(False)
-        wine_fsr_layout.addWidget(self.wine_fsr_checkbox, 0, 0, 1, 4)
+        self.proton_fsr_checkbox = QCheckBox("启用 Proton FSR 缩放 (WINE_FULLSCREEN_FSR=1)")
+        self.proton_fsr_checkbox.setChecked(False)
+        proton_fsr_layout.addWidget(self.proton_fsr_checkbox, 0, 0, 1, 4)
         
-        # FSR 锐化强度
         fsr_sharp_label = QLabel("FSR 锐化强度 (0-5, 0最锐利):")
         self.fsr_sharpness_input = QLineEdit("2")
         self.fsr_sharpness_input.setMaximumWidth(100)
@@ -198,13 +228,12 @@ class CustomLauncher(QWidget):
         fsr_sharp_layout.addWidget(fsr_sharp_label)
         fsr_sharp_layout.addWidget(self.fsr_sharpness_input)
         fsr_sharp_layout.addStretch()
-        wine_fsr_layout.addLayout(fsr_sharp_layout, 1, 0, 1, 4)
+        proton_fsr_layout.addLayout(fsr_sharp_layout, 1, 0, 1, 4)
         
-        # Wine 伪分辨率配置
-        self.wine_fake_res_checkbox = QCheckBox("启用 Wine 伪当前分辨率 (WINE_FULLSCREEN_FSR_CUSTOM_MODE)")
-        self.wine_fake_res_checkbox.setChecked(False)
-        self.wine_fake_res_checkbox.setEnabled(False) # 默认禁用
-        wine_fsr_layout.addWidget(self.wine_fake_res_checkbox, 2, 0, 1, 4)
+        self.proton_fake_res_checkbox = QCheckBox("启用 Proton 伪当前分辨率 (WINE_FULLSCREEN_FSR_CUSTOM_MODE)")
+        self.proton_fake_res_checkbox.setChecked(False)
+        self.proton_fake_res_checkbox.setEnabled(False) 
+        proton_fsr_layout.addWidget(self.proton_fake_res_checkbox, 2, 0, 1, 4)
         
         fake_res_label = QLabel("伪分辨率 (WxH):")
         self.fake_w_input = QLineEdit("2560")
@@ -219,11 +248,11 @@ class CustomLauncher(QWidget):
         fake_res_layout.addWidget(self.fake_h_input)
         fake_res_layout.addStretch()
         
-        self.fake_w_input.setEnabled(False) # 默认禁用
-        self.fake_h_input.setEnabled(False) # 默认禁用
-        wine_fsr_layout.addLayout(fake_res_layout, 3, 0, 1, 4)
+        self.fake_w_input.setEnabled(False) 
+        self.fake_h_input.setEnabled(False) 
+        proton_fsr_layout.addLayout(fake_res_layout, 3, 0, 1, 4)
 
-        scaling_layout.addWidget(wine_fsr_group)
+        scaling_layout.addWidget(proton_fsr_group)
         main_layout.addWidget(scaling_group)
 
         # --- 命令预览 (灰色文字) ---
@@ -239,95 +268,80 @@ class CustomLauncher(QWidget):
         self.setLayout(main_layout)
 
     def bind_events(self):
-        # 兼容层切换和环境路径切换
-        self.wine_combo.currentTextChanged.connect(self.handle_wine_proton_switch)
-        self.wine_prefix_checkbox.stateChanged.connect(self.update_command_preview)
-        self.steam_compat_checkbox.stateChanged.connect(self.handle_wine_proton_switch) 
+        # 监听所有输入变化以更新预览
+        # Proton 路径切换和 WINEPREFIX 路径选择
+        self.proton_combo.currentTextChanged.connect(self.handle_proton_path_switch)
+        self.custom_proton_path_input.textChanged.connect(self.update_command_preview)
+        self.wine_pfx_checkbox.stateChanged.connect(self.update_command_preview) 
+
+        # Umu 专用参数
+        self.gameid_input.textChanged.connect(self.update_command_preview)
+        self.store_input.textChanged.connect(self.update_command_preview)
+        self.pf_tricks_input.textChanged.connect(self.update_command_preview) # 新增 pf_tricks 监听
         
         # 快速开关
         self.gamemode_checkbox.stateChanged.connect(self.update_command_preview)
         self.mangohud_checkbox.stateChanged.connect(self.update_command_preview)
         self.winedll_checkbox.stateChanged.connect(self.update_command_preview)
-        
-        # 新增 Proton 专用开关
         self.proton_hdr_checkbox.stateChanged.connect(self.update_command_preview)
         self.proton_wayland_checkbox.stateChanged.connect(self.update_command_preview)
+        self.proton_verb_checkbox.stateChanged.connect(self.update_command_preview) # 新增 PROTON_VERB 监听
         
-        # Gamescope (与 Wine FSR 互斥)
+        # Gamescope
         self.gamescope_checkbox.toggled.connect(self.handle_gamescope_switch)
         self.gs_collapse_btn.clicked.connect(self.toggle_gamescope_config)
         self.fsr_checkbox.stateChanged.connect(self.update_command_preview)
-        
-        # Wine FSR (与 Gamescope 互斥，并控制伪分辨率)
-        self.wine_fsr_checkbox.toggled.connect(self.handle_wine_fsr_switch)
-        self.fsr_sharpness_input.textChanged.connect(self.update_command_preview)
-        
-        # Wine 伪分辨率 (与 Gamescope 互斥，并依赖 Wine FSR)
-        self.wine_fake_res_checkbox.toggled.connect(self.handle_wine_fake_res_switch)
-        self.fake_w_input.textChanged.connect(self.update_command_preview)
-        self.fake_h_input.textChanged.connect(self.update_command_preview)
-        
-        # 输入框
-        self.env_input.textChanged.connect(self.update_command_preview)
-        self.args_input.textChanged.connect(self.update_command_preview)
         self.w_input.textChanged.connect(self.update_command_preview)
         self.h_input.textChanged.connect(self.update_command_preview)
         self.W_input.textChanged.connect(self.update_command_preview)
         self.H_input.textChanged.connect(self.update_command_preview)
+        
+        # Proton FSR
+        self.proton_fsr_checkbox.toggled.connect(self.handle_proton_fsr_switch)
+        self.fsr_sharpness_input.textChanged.connect(self.update_command_preview)
+        
+        # Proton 伪分辨率
+        self.proton_fake_res_checkbox.toggled.connect(self.handle_proton_fake_res_switch)
+        self.fake_w_input.textChanged.connect(self.update_command_preview)
+        self.fake_h_input.textChanged.connect(self.update_command_preview)
+        
+        # 额外输入框
+        self.env_input.textChanged.connect(self.update_command_preview)
+        self.args_input.textChanged.connect(self.update_command_preview)
 
-    def handle_wine_proton_switch(self, selected_name):
-        """处理 Wine/Proton 切换时的 WINEPREFIX/STEAM_COMPAT_DATA_PATH 和 Proton 专用复选框状态"""
-        wine_cmd = WINE_COMMANDS.get(selected_name)
-        is_wine = wine_cmd == "wine"
-        is_proton = wine_cmd != "wine" 
-        
-        # WINEPREFIX 仅在 Wine 模式下启用
-        self.wine_prefix_checkbox.setEnabled(is_wine)
-        # STEAM_COMPAT_DATA_PATH 仅在 Proton 模式下启用 
-        self.steam_compat_checkbox.setEnabled(is_proton)
-        
-        # 新增：Proton 专用环境变量仅在 Proton 模式下启用
-        self.proton_hdr_checkbox.setEnabled(is_proton)
-        self.proton_wayland_checkbox.setEnabled(is_proton)
-        
-        # 强制更新配置预览
+    def handle_proton_path_switch(self, selected_name):
+        """处理 PROTONPATH 切换，控制自定义输入框的启用/禁用"""
+        is_custom = selected_name == "自定义"
+        self.custom_proton_path_input.setEnabled(is_custom)
         self.update_command_preview()
-        
+
+    # Gamescope, Proton FSR 和 伪分辨率的互斥逻辑与 V2 保持一致，以保持代码简洁
     def handle_gamescope_switch(self, checked):
-        """处理 Gamescope 切换时的状态和与 Wine FSR 组的互斥。"""
+        """处理 Gamescope 切换时的状态和与 Proton FSR 组的互斥。"""
+        self.proton_fsr_checkbox.setEnabled(not checked)
         
-        # 如果 Gamescope 启用，则禁用 Wine FSR 组的所有组件
-        self.wine_fsr_checkbox.setEnabled(not checked)
-        self.wine_fake_res_checkbox.setEnabled(not checked and self.wine_fsr_checkbox.isChecked())
-        
-        # Gamescope 启用时，强制关闭 Wine FSR 和伪分辨率，并禁用其子组件
         if checked:
-            self.wine_fsr_checkbox.setChecked(False)
-            self.wine_fake_res_checkbox.setChecked(False)
+            self.proton_fsr_checkbox.setChecked(False)
+            self.proton_fake_res_checkbox.setChecked(False)
             self.fsr_sharpness_input.setEnabled(False)
+            self.proton_fake_res_checkbox.setEnabled(False)
             self.fake_w_input.setEnabled(False)
             self.fake_h_input.setEnabled(False)
             
-            # Gamescope 启用时，强制展开配置区域
             if not self.gs_config_widget.isVisible():
                 self.gs_config_widget.setVisible(True)
                 self.gs_collapse_btn.setText("▲ 收起配置")
         else:
-             # Gamescope 禁用时：
-             
-             # 恢复 Wine FSR 组组件的启用状态（基于其自身是否被勾选）
-             self.fsr_sharpness_input.setEnabled(self.wine_fsr_checkbox.isChecked())
-             # 恢复 Wine 伪分辨率的启用状态，它依赖于 Wine FSR
-             self.wine_fake_res_checkbox.setEnabled(self.wine_fsr_checkbox.isChecked())
-             self.fake_w_input.setEnabled(self.wine_fake_res_checkbox.isChecked())
-             self.fake_h_input.setEnabled(self.wine_fake_res_checkbox.isChecked())
-             
-             # 禁用时自动折叠 Gamescope 配置
-             if self.gs_config_widget.isVisible():
-                 self.gs_config_widget.setVisible(False)
-                 self.gs_collapse_btn.setText("▼ 展开配置")
+            is_fsr_checked = self.proton_fsr_checkbox.isChecked()
+            self.fsr_sharpness_input.setEnabled(is_fsr_checked)
+            self.proton_fake_res_checkbox.setEnabled(is_fsr_checked)
+            self.fake_w_input.setEnabled(is_fsr_checked and self.proton_fake_res_checkbox.isChecked())
+            self.fake_h_input.setEnabled(is_fsr_checked and self.proton_fake_res_checkbox.isChecked())
+            
+            if self.gs_config_widget.isVisible():
+                self.gs_config_widget.setVisible(False)
+                self.gs_collapse_btn.setText("▼ 展开配置")
         
-        # Gamescope 子控件的状态 (分辨率和 FSR)
         self.w_input.setEnabled(checked)
         self.h_input.setEnabled(checked)
         self.W_input.setEnabled(checked)
@@ -336,56 +350,42 @@ class CustomLauncher(QWidget):
 
         self.update_command_preview()
 
-    def handle_wine_fsr_switch(self, checked):
-        """处理 Wine FSR 切换时的状态，控制 Wine 伪分辨率的启用，并处理与 Gamescope 的互斥。"""
-        
-        # 1. 控制 Wine FSR 子控件的状态
+    def handle_proton_fsr_switch(self, checked):
+        """处理 Proton FSR 切换时的状态，控制 Proton 伪分辨率的启用，并处理与 Gamescope 的互斥。"""
         self.fsr_sharpness_input.setEnabled(checked)
+        self.proton_fake_res_checkbox.setEnabled(checked)
         
-        # 2. 控制 Wine 伪分辨率复选框的启用状态（核心需求）
-        self.wine_fake_res_checkbox.setEnabled(checked)
-        
-        # 如果 Wine FSR 被关闭，则强制关闭伪分辨率及其输入框
         if not checked:
-            self.wine_fake_res_checkbox.setChecked(False)
+            self.proton_fake_res_checkbox.setChecked(False)
             self.fake_w_input.setEnabled(False)
             self.fake_h_input.setEnabled(False)
         else:
-             # 如果 Wine FSR 被打开，伪分辨率输入框的状态由其自身的勾选状态决定
-             self.fake_w_input.setEnabled(self.wine_fake_res_checkbox.isChecked())
-             self.fake_h_input.setEnabled(self.wine_fake_res_checkbox.isChecked())
+            is_fake_res_checked = self.proton_fake_res_checkbox.isChecked()
+            self.fake_w_input.setEnabled(is_fake_res_checked)
+            self.fake_h_input.setEnabled(is_fake_res_checked)
         
-        # 3. 互斥逻辑：检查 Wine FSR 或 Wine 伪分辨率是否**任意一个**被勾选
-        # 注意：因为伪分辨率依赖于 FSR，所以只需要检查 FSR 是否勾选即可
-        is_any_wine_scaling_enabled = checked
+        is_any_scaling_enabled = checked
+        self.gamescope_checkbox.setEnabled(not is_any_scaling_enabled)
+        self.gamescope_group.setEnabled(not is_any_scaling_enabled) 
         
-        # 4. 禁用 Gamescope
-        self.gamescope_checkbox.setEnabled(not is_any_wine_scaling_enabled)
-        self.gamescope_group.setEnabled(not is_any_wine_scaling_enabled) 
-        
-        # 5. 如果 Gamescope 被禁用，则强制关闭它
-        if is_any_wine_scaling_enabled:
+        if is_any_scaling_enabled:
             self.gamescope_checkbox.setChecked(False)
         
         self.update_command_preview()
 
-    def handle_wine_fake_res_switch(self, checked):
-        """处理 Wine 伪分辨率切换时的子控件状态和与 Gamescope 的互斥。"""
-        
-        # 1. Wine 伪分辨率子控件的状态
+    def handle_proton_fake_res_switch(self, checked):
+        """处理 Proton 伪分辨率切换时的子控件状态和与 Gamescope 的互斥。"""
         self.fake_w_input.setEnabled(checked)
         self.fake_h_input.setEnabled(checked)
         
-        # 2. 互斥逻辑： Gamescope 应该禁用，因为 Wine FSR 肯定是开启的
-        is_wine_fsr_enabled = self.wine_fsr_checkbox.isChecked()
-        is_gamescope_allowed = not is_wine_fsr_enabled
+        is_fsr_enabled = self.proton_fsr_checkbox.isChecked()
+        is_gamescope_allowed = not is_fsr_enabled 
         
-        # 禁用 Gamescope
         self.gamescope_checkbox.setEnabled(is_gamescope_allowed)
         self.gamescope_group.setEnabled(is_gamescope_allowed)
         
         if not is_gamescope_allowed:
-             self.gamescope_checkbox.setChecked(False)
+            self.gamescope_checkbox.setChecked(False)
             
         self.update_command_preview()
         
@@ -394,7 +394,6 @@ class CustomLauncher(QWidget):
         is_visible = self.gs_config_widget.isVisible()
         self.gs_config_widget.setVisible(not is_visible)
         
-        # 更新按钮文字
         if is_visible:
             self.gs_collapse_btn.setText("▼ 展开配置")
         else:
@@ -404,20 +403,25 @@ class CustomLauncher(QWidget):
     def save_config(self):
         """将当前 UI 状态保存为 JSON 文件"""
         config_data = {
-            "wine_combo": self.wine_combo.currentText(),
-            "wine_prefix_checked": self.wine_prefix_checkbox.isChecked(),
-            "steam_compat_checked": self.steam_compat_checkbox.isChecked(),
+            "proton_combo": self.proton_combo.currentText(),
+            "custom_proton_path_input": self.custom_proton_path_input.text(),
+            "wine_pfx_checked": self.wine_pfx_checkbox.isChecked(), 
+            
+            "gameid_input": self.gameid_input.text(),
+            "store_input": self.store_input.text(),
+            "pf_tricks_input": self.pf_tricks_input.text(), # 新增保存
+            
             "env_input": self.env_input.text(),
             "args_input": self.args_input.text(),
+            
             "mangohud_checked": self.mangohud_checkbox.isChecked(),
             "gamemode_checked": self.gamemode_checkbox.isChecked(),
             "winedll_checked": self.winedll_checkbox.isChecked(),
             
-            # 新增 Proton 专用配置
             "proton_hdr_checked": self.proton_hdr_checkbox.isChecked(),
             "proton_wayland_checked": self.proton_wayland_checkbox.isChecked(),
+            "proton_verb_checked": self.proton_verb_checkbox.isChecked(), # 新增保存
             
-            # Gamescope 配置
             "gamescope_checked": self.gamescope_checkbox.isChecked(),
             "w_input": self.w_input.text(),
             "h_input": self.h_input.text(),
@@ -425,12 +429,10 @@ class CustomLauncher(QWidget):
             "H_input": self.H_input.text(),
             "fsr_checked": self.fsr_checkbox.isChecked(),
             
-            # Wine FSR 配置
-            "wine_fsr_checked": self.wine_fsr_checkbox.isChecked(),
+            "proton_fsr_checked": self.proton_fsr_checkbox.isChecked(),
             "fsr_sharpness_input": self.fsr_sharpness_input.text(),
             
-            # Wine 伪分辨率配置
-            "wine_fake_res_checked": self.wine_fake_res_checkbox.isChecked(),
+            "proton_fake_res_checked": self.proton_fake_res_checkbox.isChecked(),
             "fake_w_input": self.fake_w_input.text(),
             "fake_h_input": self.fake_h_input.text(),
         }
@@ -444,6 +446,9 @@ class CustomLauncher(QWidget):
 
     def load_config(self):
         """从 JSON 文件加载配置并设置 UI 状态"""
+        # 设置默认值
+        self.gameid_input.setText("0") # GAMEID 默认值 0
+        
         if not os.path.exists(self.config_path):
             return
 
@@ -451,30 +456,34 @@ class CustomLauncher(QWidget):
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
             
-            # 恢复 ComboBox
-            if "wine_combo" in config_data and config_data["wine_combo"] in WINE_COMMANDS:
-                self.wine_combo.setCurrentText(config_data["wine_combo"])
+            # 恢复 ComboBox 和自定义路径
+            if "proton_combo" in config_data and config_data["proton_combo"] in PROTON_PATHS:
+                self.proton_combo.setCurrentText(config_data["proton_combo"])
+            self.custom_proton_path_input.setText(config_data.get("custom_proton_path_input", ""))
+
+            # 恢复 WINEPREFIX 选择
+            self.wine_pfx_checkbox.setChecked(config_data.get("wine_pfx_checked", False))
+            
+            # 恢复 Umu 专用参数 (GAMEID 使用默认值，除非配置文件中有)
+            self.gameid_input.setText(config_data.get("gameid_input", "0"))
+            self.store_input.setText(config_data.get("store_input", ""))
+            self.pf_tricks_input.setText(config_data.get("pf_tricks_input", "")) # 恢复 pf_tricks
 
             # 恢复 CheckBoxes
-            self.wine_prefix_checkbox.setChecked(config_data.get("wine_prefix_checked", False))
-            self.steam_compat_checkbox.setChecked(config_data.get("steam_compat_checked", False)) 
             self.mangohud_checkbox.setChecked(config_data.get("mangohud_checked", True))
             self.gamemode_checkbox.setChecked(config_data.get("gamemode_checked", False))
             self.winedll_checkbox.setChecked(config_data.get("winedll_checked", False))
-            
-            # 恢复新增 Proton 专用配置
             self.proton_hdr_checkbox.setChecked(config_data.get("proton_hdr_checked", False))
             self.proton_wayland_checkbox.setChecked(config_data.get("proton_wayland_checked", False))
+            self.proton_verb_checkbox.setChecked(config_data.get("proton_verb_checked", False)) # 恢复 PROTON_VERB
             
             # Gamescope 配置
             self.gamescope_checkbox.setChecked(config_data.get("gamescope_checked", False))
             self.fsr_checkbox.setChecked(config_data.get("fsr_checked", False))
             
-            # Wine FSR 配置
-            self.wine_fsr_checkbox.setChecked(config_data.get("wine_fsr_checked", False))
-            
-            # Wine 伪分辨率配置
-            self.wine_fake_res_checkbox.setChecked(config_data.get("wine_fake_res_checked", False))
+            # Proton FSR 配置
+            self.proton_fsr_checkbox.setChecked(config_data.get("proton_fsr_checked", False))
+            self.proton_fake_res_checkbox.setChecked(config_data.get("proton_fake_res_checked", False))
 
             # 恢复 LineEdits
             self.env_input.setText(config_data.get("env_input", ""))
@@ -483,11 +492,7 @@ class CustomLauncher(QWidget):
             self.h_input.setText(config_data.get("h_input", "1080"))
             self.W_input.setText(config_data.get("W_input", "3840")) 
             self.H_input.setText(config_data.get("H_input", "2160")) 
-            
-            # Wine FSR 锐化值
-            self.fsr_sharpness_input.setText(config_data.get("fsr_sharpness_input", "5"))
-            
-            # Wine 伪分辨率值
+            self.fsr_sharpness_input.setText(config_data.get("fsr_sharpness_input", "2"))
             self.fake_w_input.setText(config_data.get("fake_w_input", "2560"))
             self.fake_h_input.setText(config_data.get("fake_h_input", "1440"))
 
@@ -496,106 +501,109 @@ class CustomLauncher(QWidget):
 
     def get_command_details(self):
         """获取并返回启动命令的所有组件和配置"""
-        wine_cmd = WINE_COMMANDS.get(self.wine_combo.currentText())
-        is_wine = wine_cmd == "wine"
-        is_proton = wine_cmd != "wine"
         
-        # --- 1. 环境路径配置 ---
-        wine_prefix_path = ""
-        steam_compat_path = ""
+        # --- 1. PROTONPATH 和 WINEPREFIX (与 V2 相同) ---
+        selected_proton = self.proton_combo.currentText()
+        proton_path = self.custom_proton_path_input.text().strip() if selected_proton == "自定义" else PROTON_PATHS[selected_proton].strip()
+            
+        wine_prefix_path = os.path.join(self.game_dir, CONFIG_DIR_NAME, LOCAL_PFX_DIR_NAME) if self.wine_pfx_checkbox.isChecked() else DEFAULT_GLOBAL_PFX
         
-        if is_wine and self.wine_prefix_checkbox.isChecked():
-            # Wine 模式使用 WINEPREFIX
-            wine_prefix_path = os.path.join(self.game_dir, CONFIG_DIR_NAME, WINE_PFX_DIR_NAME)
+        # --- 2. 环境变量 (Umu/Proton/额外) ---
+        env_vars_list = []
         
-        if is_proton and self.steam_compat_checkbox.isChecked():
-            # Proton 模式使用 STEAM_COMPAT_DATA_PATH
-            steam_compat_path = os.path.join(self.game_dir, CONFIG_DIR_NAME, PROTON_COMPAT_DIR_NAME)
+        # Umu 专用环境变量 (GAMEID, STORE)
+        game_id = self.gameid_input.text().strip()
+        if game_id:
+            env_vars_list.append(f"GAMEID={game_id}")
+        store = self.store_input.text().strip()
+        if store:
+            env_vars_list.append(f"STORE={store}")
+            
+        # PROTON_VERB=runinprefix
+        if self.proton_verb_checkbox.isChecked():
+            env_vars_list.append("PROTON_VERB=runinprefix")
+        
+        # 额外环境变量 (ENV)
+        env_vars_list.extend([v for v in self.env_input.text().strip().split() if v]) 
+        
+        is_gamescope_enabled = self.gamescope_checkbox.isChecked()
+        is_mangohud_requested = self.mangohud_checkbox.isChecked()
 
-        # --- 2. 环境变量 (ENV) ---
-        env_vars_list = [v for v in self.env_input.text().strip().split() if v] 
-        
-        # 检查并添加 WINEDLLOVERRIDES
+        # 检查并添加通用和 Proton 环境变量
         if self.winedll_checkbox.isChecked():
             env_vars_list.append('WINEDLLOVERRIDES="winhttp=n,b"')
-            
-        # 检查并添加 PROTON 专用环境变量
-        if is_proton:
-            if self.proton_wayland_checkbox.isChecked():
-                # 检查是否已包含
-                if all(not v.upper().startswith("PROTON_ENABLE_WAYLAND=") for v in env_vars_list):
-                    env_vars_list.append("PROTON_ENABLE_WAYLAND=1")
-            if self.proton_hdr_checkbox.isChecked():
-                # 检查是否已包含，避免重复添加
-                if all(not v.upper().startswith("PROTON_ENABLE_HDR=") for v in env_vars_list):
-                    env_vars_list.append("PROTON_ENABLE_HDR=1")
-
-        # 检查 Gamescope 状态，Gamescope 启用时，下面的 Wine 环境变量全部跳过
-        is_gamescope_enabled = self.gamescope_checkbox.isChecked()
+        if self.proton_wayland_checkbox.isChecked() and all(not v.upper().startswith("PROTON_ENABLE_WAYLAND=") for v in env_vars_list):
+            env_vars_list.append("PROTON_ENABLE_WAYLAND=1")
+        if self.proton_hdr_checkbox.isChecked() and all(not v.upper().startswith("PROTON_ENABLE_HDR=") for v in env_vars_list):
+            env_vars_list.append("PROTON_ENABLE_HDR=1")
 
         if not is_gamescope_enabled:
-            # 检查并添加 Wine FSR 环境变量
-            if self.wine_fsr_checkbox.isChecked():
+            # FSR 和伪分辨率
+            if self.proton_fsr_checkbox.isChecked():
                 env_vars_list.append("WINE_FULLSCREEN_FSR=1")
                 sharpness = self.fsr_sharpness_input.text().strip()
-                # 仅在输入框有值时才添加      WINE_FULLSCREEN_FSR_STRENGTH 变量
                 if sharpness:
                     env_vars_list.append(f"WINE_FULLSCREEN_FSR_STRENGTH={sharpness}")
             
-            # 检查并添加 Wine 伪分辨率环境变量
-            if self.wine_fake_res_checkbox.isChecked():
+            if self.proton_fake_res_checkbox.isChecked():
                 fake_w = self.fake_w_input.text().strip()
                 fake_h = self.fake_h_input.text().strip()
                 if fake_w and fake_h:
                     env_vars_list.append(f"WINE_FULLSCREEN_FSR_CUSTOM_MODE={fake_w}x{fake_h}")
+                    
+            # MangoHud 独立设置
+            if is_mangohud_requested:
+                if all(not v.upper().startswith("MANGOHUD=") for v in env_vars_list):
+                    env_vars_list.insert(0, "MANGOHUD=1")
+        
+        # 整理环境变量字符串
+        env_vars = " ".join(env_vars_list).strip()
 
-        # --- 3. 前置启动器/包装器 (PREFIX CMD)
+        # --- 3. 前置启动器/包装器 (PREFIX CMD) ---
         prefix_cmd_list = []
         if self.gamemode_checkbox.isChecked():
             prefix_cmd_list.append("gamemoderun")
         
-        # 4. Gamescope 和 MangoHud 联动逻辑
-        is_mangohud_requested = self.mangohud_checkbox.isChecked()
-        
+        # Gamescope 启动器
         if is_gamescope_enabled:
-            # Gamescope 启用，构建 Gamescope 命令
             gs_cmd_list = ["gamescope", "-f"] 
             
-            # 分辨率参数 (从输入框获取)
             gs_cmd_list.extend(["-w", self.w_input.text().strip()])
             gs_cmd_list.extend(["-h", self.h_input.text().strip()])
             gs_cmd_list.extend(["-W", self.W_input.text().strip()])
             gs_cmd_list.extend(["-H", self.H_input.text().strip()])
             
-            # Gamescope FSR 参数
             if self.fsr_checkbox.isChecked():
                 gs_cmd_list.extend(["-F", "fsr"])
             
-            # MangoHud/App 联动逻辑
             if is_mangohud_requested:
                 gs_cmd_list.append("--mangoapp")
             
             prefix_cmd_list.append(" ".join(gs_cmd_list))
             
-            # 移除用户可能手动输入的 MANGOHUD=1 (以防冲突)
-            env_vars_list = [v for v in env_vars_list if not v.upper().startswith("MANGOHUD=")]
-            
-        elif is_mangohud_requested:
-            # Gamescope 未启用，MangoHud 独立设置
-            if all(not v.upper().startswith("MANGOHUD=") for v in env_vars_list):
-                 env_vars_list.insert(0, "MANGOHUD=1")
-            
-        # 整理环境变量字符串
-        env_vars = " ".join(env_vars_list).strip()
+            # Gamescope 启用时，移除用户可能手动输入的 MANGOHUD=1
+            env_vars = " ".join([v for v in env_vars_list if not v.upper().startswith("MANGOHUD=")]).strip()
 
-        # 整理游戏参数
+        # --- 4. Umu 内部参数 (-pf_tricks) ---
+        # 调整：将 -pf_tricks 作为一个单独的列表返回，以便将其放在命令的最后
+        extra_args_list = []
+        pf_tricks_raw = self.pf_tricks_input.text().strip()
+        if pf_tricks_raw:
+            tricks = [t.strip() for t in pf_tricks_raw.split(',') if t.strip()]
+            for trick in tricks:
+                 # 注意：这里我们只收集参数，不加 umu-run 的引号
+                extra_args_list.append(f"-pf_tricks={trick}") 
+        
+        # 5. 整理游戏参数 (放置在 .exe 后面，但在 -pf_tricks 前面)
         args = self.args_input.text().strip()
 
-        return wine_cmd, wine_prefix_path, steam_compat_path, env_vars, args, prefix_cmd_list
+        # 返回值调整：移除 umu_internal_args_str，新增 extra_args_list
+        return proton_path, wine_prefix_path, env_vars, args, prefix_cmd_list, extra_args_list
 
     def update_command_preview(self):
         """更新底部的命令预览文本"""
-        wine_cmd, wine_prefix, steam_compat_path, env_vars, args, prefix_cmd_list = self.get_command_details()
+        # 接收调整后的返回值
+        proton_path, wine_prefix, env_vars, args, prefix_cmd_list, extra_args_list = self.get_command_details()
         
         display_cmd = []
         
@@ -603,33 +611,30 @@ class CustomLauncher(QWidget):
         if env_vars:
             display_cmd.append(env_vars)
         
-        # 2. WINEPREFIX / STEAM_COMPAT_DATA_PATH
+        # 2. WINEPREFIX / PROTONPATH
         if wine_prefix:
             display_cmd.append(f"WINEPREFIX='{wine_prefix}'")
-        if steam_compat_path:
-            display_cmd.append(f"STEAM_COMPAT_DATA_PATH='{steam_compat_path}'")
+        if proton_path:
+            display_cmd.append(f"PROTONPATH='{proton_path}'")
         
         # 3. 前置命令 (gamemoderun, gamescope)
         if prefix_cmd_list:
             display_cmd.extend(prefix_cmd_list)
         
-        # 4. Wine/Proton 命令
-        display_cmd.append(wine_cmd)
+        # 4. UMU-RUN 命令
+        display_cmd.append("umu-run")
         
-        # 5. Wine 启动和 EXE 路径 (用于显示)
+        # 5. EXE 路径 (用于显示)
         exe_display = f"'{os.path.basename(self.exe_path)}'" 
+        display_cmd.append(exe_display)
 
-        # 6. 核心命令 (在 foot 中执行的部分)
-        if wine_cmd == "wine":
-             display_cmd.append("start /unix")
-             display_cmd.append(exe_display)
-        else:
-             display_cmd.append("run")
-             display_cmd.append(exe_display)
-
-        # 7. 游戏参数
+        # 6. 游戏参数
         if args:
-             display_cmd.append(args)
+            display_cmd.append(args)
+
+        # 7. Umu 内部参数 (-pf_tricks) - 调整到最后
+        if extra_args_list:
+            display_cmd.extend(extra_args_list)
 
         preview_text = f"最终运行命令: {' '.join(display_cmd).strip()}"
         self.preview_label.setText(preview_text)
@@ -640,37 +645,39 @@ class CustomLauncher(QWidget):
         # 1. 保存配置
         self.save_config()
         
-        wine_cmd, wine_prefix, steam_compat_path, env_vars, args, prefix_cmd_list = self.get_command_details()
+        # 接收调整后的返回值
+        proton_path, wine_prefix, env_vars, args, prefix_cmd_list, extra_args_list = self.get_command_details()
 
-        # 2. 构造 Wine/Proton 内部命令
+        # 2. 构造 umu 内部命令
         exe_quoted = f"'{self.exe_path}'"
         
-        # Wine/Proton 命令部分
-        if wine_cmd == "wine":
-             main_command = f"{wine_cmd} start /unix {exe_quoted} {args}"
-        else:
-             main_command = f"{wine_cmd} run {exe_quoted} {args}"
-             
+        # 内部命令格式：umu-run <exe_path> <args> <extra_args_list>
+        main_command_parts = ["umu-run", exe_quoted]
+        if args:
+            main_command_parts.append(args)
+        if extra_args_list: # 将 -pf_tricks 放在最后
+            main_command_parts.extend(extra_args_list)
+            
+        main_command = " ".join(main_command_parts)
+            
         # 3. 构造前置命令
         if prefix_cmd_list:
-            # Gamescope/gamemoderun 在最外部包裹 Wine 命令
             final_run_cmd = f"{' '.join(prefix_cmd_list)} {main_command}"
         else:
             final_run_cmd = main_command
 
-        # 4. 构造环境变量字符串 (将 WINEPREFIX 和 STEAM_COMPAT_DATA_PATH 放在最前面)
+        # 4. 构造环境变量字符串 (WINEPREFIX, PROTONPATH, 额外 ENV)
         env_string_list = []
         if wine_prefix:
-             env_string_list.append(f"WINEPREFIX='{wine_prefix}'")
-        if steam_compat_path:
-             env_string_list.append(f"STEAM_COMPAT_DATA_PATH='{steam_compat_path}'")
+            env_string_list.append(f"WINEPREFIX='{wine_prefix}'")
+        if proton_path:
+            env_string_list.append(f"PROTONPATH='{proton_path}'")
         if env_vars:
-             env_string_list.append(env_vars)
-        
+            env_string_list.append(env_vars)
+            
         env_string = " ".join(env_string_list)
         
         # 5. 最终在 foot 中执行的完整 bash 命令
-        # 这里必须使用分号分隔，因为 Bash -c 接收一个字符串作为命令
         full_command_in_foot = f"{env_string} {final_run_cmd}".strip()
         bash_command = full_command_in_foot 
         
@@ -679,14 +686,14 @@ class CustomLauncher(QWidget):
             "foot", 
             "-T", f"日志: {os.path.basename(self.exe_path)}",
             "-e", "bash", "-c",
-            bash_command + "; exit"
+            bash_command + " && echo '命令执行完毕，按任意键退出...' && read" 
         ]
         
         try:
             subprocess.Popen(foot_cmd)
             QTimer.singleShot(100, self.close) 
         except FileNotFoundError as e:
-            missing_cmd = str(e).split("'")[1] if "'" in str(e) else "foot/proton-ge/gamescope 等"
+            missing_cmd = str(e).split("'")[1] if "'" in str(e) else "foot/umu-run/gamescope 等"
             QMessageBox.critical(self, "错误", f"找不到必要的命令：'{missing_cmd}'。请检查 PATH。")
         except Exception as e:
             QMessageBox.critical(self, "启动失败", f"启动过程中发生错误: {e}")
@@ -703,7 +710,6 @@ if __name__ == "__main__":
         QMessageBox.critical(None, "错误", f"找不到文件: {exe_file_path}")
         sys.exit(1)
         
-    # 确保 CWD 是游戏目录，方便相对路径 pfx/wine 工作
     os.chdir(os.path.dirname(exe_file_path))
 
     window = CustomLauncher(exe_file_path)

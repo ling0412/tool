@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=startgame 启动器
-Comment=使用自定义 Proton/Wine 版本和环境变量启动 EXE
+Comment=使用UMU的快速游戏配置器
 Exec=/home/ling/.local/bin/startgame %f
 Terminal=false
 Type=Application
