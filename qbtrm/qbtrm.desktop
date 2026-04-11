@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=qBittorrent 删除
+Comment=通过文件名溯源 qBittorrent 任务并删除
+# 请确保下面的路径指向你真实的脚本位置
+Exec=/home/ling/.local/bin/qbtrm %F
+Icon=edit-delete
+MimeType=video/mp4;video/x-matroska;video/quicktime;video/x-flv;video/x-msvideo;application/octet-stream;
+Terminal=false
+Categories=Utility;Network;

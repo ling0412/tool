@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=FFmpeg GUI
+Name[zh_CN]=FFmpeg GUI
+Comment=使用 FFmpeg GUI 应用程序处理选定的媒体文件。
+Comment[zh_CN]=Process the selected media file using the FFmpeg GUI application.
+Exec=/home/ling/.local/bin/ffmpeg-gui %U
+MimeType=video/mp4;video/x-matroska;video/webm;video/avi;video/quicktime;audio/mpeg;audio/ogg;audio/flac;image/jpeg;image/png;image/gif;
+Categories=Utility;Video;AudioVideo;
+Icon=system-run
+Terminal=false
+StartupNotify=true
