@@ -1,0 +1,9 @@
+target_root = "/mnt/media/all_links"
+
+[[sources]]
+path = "/mnt/disk_a/downloads"
+patterns = ["*.mkv", "*.mp4", "*.iso"]
+
+[[sources]]
+path = "/mnt/nfs_share/movies"
+patterns = ["*.mkv"]

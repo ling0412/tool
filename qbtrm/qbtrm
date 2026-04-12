@@ -2,176 +2,260 @@
 import sys
 import os
 import requests
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QLabel, QPushButton, QCheckBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QAbstractItemView, QFrame)
+                             QLabel, QPushButton, QCheckBox, QTreeWidget, QTreeWidgetItem,
+                             QHeaderView, QMessageBox, QFrame)
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QColor, QBrush
 
-# --- 配置区 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
+
+# --- 核心配置 ---
 QBT_URL = "http://localhost:8080"
 QBT_USER = "admin"
 QBT_PASS = "password"
 
-def get_status_cn(state):
-    state_map = {
-        'downloading': '下载中', 'stalledDL': '队列中',
-        'uploading': '做种中', 'stalledUP': '做种(闲置)',
-        'pausedDL': '已暂停', 'pausedUP': '已暂停',
-        'checkingDL': '校验中', 'checkingUP': '校验中',
-        'error': '错误', 'missingFiles': '文件丢失'
+class TorrentState:
+    MAP = {
+        'downloading': '下载中', 'stalledDL': '队列中', 'uploading': '做种中',
+        'stalledUP': '做种(闲置)', 'pausedDL': '已暂停', 'pausedUP': '已暂停',
+        'checkingDL': '校验中', 'checkingUP': '校验中', 'error': '错误', 'missingFiles': '文件丢失'
     }
-    return state_map.get(state, state)
+    @classmethod
+    def translate(cls, state):
+        return cls.MAP.get(state, state)
 
-class SearchThread(QThread):
+class SearchWorker(QThread):
+    """异步检索线程：关联本地路径与种子元数据"""
     finished_signal = Signal(list)
     
-    def __init__(self, file_paths):
+    def __init__(self, file_paths, cookies):
         super().__init__()
         self.targets = [os.path.basename(p).lower() for p in file_paths]
-        self.session = requests.Session()
+        self.auth_cookies = cookies
 
-    def fetch_files(self, torrent):
-        try:
-            r = self.session.get(f"{QBT_URL}/api/v2/torrents/files?hash={torrent['hash']}", timeout=2)
-            if any(any(t in f['name'].lower() for t in self.targets) for f in r.json()):
-                return torrent
-        except: return None
+    def _fetch_payload_details(self, torrent):
+        with requests.Session() as s:
+            s.cookies.update(self.auth_cookies)
+            try:
+                endpoint = f"{QBT_URL}/api/v2/torrents/files?hash={torrent['hash']}"
+                resp = s.get(endpoint, timeout=5)
+                resp.raise_for_status()
+                payload_files = resp.json()
+                
+                if any(any(t in f['name'].lower() for t in self.targets) for f in payload_files):
+                    result = dict(torrent)
+                    result['file_content_map'] = [f['name'] for f in payload_files]
+                    return result
+            except Exception as e:
+                logging.error(f"Metadata fetch failed [{torrent['hash'][:8]}]: {e}")
+        return None
 
     def run(self):
         try:
-            # 预登录以获取 Cookie
-            self.session.post(f"{QBT_URL}/api/v2/auth/login", data={'username': QBT_USER, 'password': QBT_PASS}, timeout=2)
-            torrents = self.session.get(f"{QBT_URL}/api/v2/torrents/info").json()
-            with ThreadPoolExecutor(max_workers=15) as ex:
-                results = list(ex.map(self.fetch_files, torrents))
+            with requests.Session() as s:
+                s.cookies.update(self.auth_cookies)
+                resp = s.get(f"{QBT_URL}/api/v2/torrents/info", timeout=10)
+                resp.raise_for_status()
+                torrents = resp.json()
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(self._fetch_payload_details, torrents))
+            
             self.finished_signal.emit([t for t in results if t])
-        except: self.finished_signal.emit([])
+        except Exception as e:
+            logging.error(f"Search worker error: {e}")
+            self.finished_signal.emit([])
+
+class DeleteWorker(QThread):
+    """异步删除线程：内置严格的重新认证校验"""
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, hashes, delete_files):
+        super().__init__()
+        self.hashes = hashes
+        self.delete_files = delete_files
+
+    def run(self):
+        try:
+            with requests.Session() as s:
+                auth_resp = s.post(f"{QBT_URL}/api/v2/auth/login", 
+                                 data={'username': QBT_USER, 'password': QBT_PASS}, timeout=5)
+                auth_resp.raise_for_status()
+                
+                if auth_resp.text.strip() != "Ok.":
+                    raise RuntimeError(f"认证失败: {auth_resp.text.strip()}")
+                
+                endpoint = f"{QBT_URL}/api/v2/torrents/delete"
+                data = {
+                    'hashes': '|'.join(self.hashes), 
+                    'deleteFiles': 'true' if self.delete_files else 'false'
+                }
+                # torrents/delete 成功时返回 200 且 body 为空，由 raise_for_status 捕获 HTTP 错误即可
+                resp = s.post(endpoint, data=data, timeout=15)
+                resp.raise_for_status()
+                
+                self.finished_signal.emit(True, "Success")
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))
 
 class Reaper(QMainWindow):
     def __init__(self, file_paths):
         super().__init__()
-        self.setWindowTitle("qBittorrent 定向清理")
-        self.resize(750, 480)
+        self.setWindowTitle("qBittorrent Directed Cleanup")
+        self.resize(1000, 650)
         
+        self.file_paths = file_paths
+        self.worker = None
+        self.del_worker = None
         self.session = requests.Session()
-        self.torrent_list = []
+        self.session.headers.update({'Referer': QBT_URL})
         
-        container = QWidget()
-        self.setCentralWidget(container)
-        layout = QVBoxLayout(container)
-        
-        info_layout = QHBoxLayout()
-        info_layout.setContentsMargins(20, 10, 20, 0)
-        self.info = QLabel(f"正在扫描 {len(file_paths)} 个文件...")
-        info_layout.addWidget(self.info)
-        layout.addLayout(info_layout)
+        self._setup_ui()
+        self._authenticate_and_start()
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["选择", "任务名称", "状态", "大小", "进度"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setFrameShape(QFrame.NoFrame)
+    def _setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
         
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setHighlightSections(False)
-        self.table.setColumnWidth(0, 60)
-        self.table.setColumnWidth(2, 100)
-        self.table.setColumnWidth(3, 90)
-        self.table.setColumnWidth(4, 70)
-        
-        layout.setContentsMargins(0, 15, 0, 15)
-        layout.setSpacing(10)
-        layout.addWidget(self.table)
+        self.status_label = QLabel("Status: 初始化中...")
+        main_layout.addWidget(self.status_label)
 
-        footer_wrapper = QWidget()
-        footer = QHBoxLayout(footer_wrapper)
-        footer.setContentsMargins(20, 0, 20, 5)
+        self.tree_view = QTreeWidget()
+        self.tree_view.setColumnCount(4)
+        self.tree_view.setHeaderLabels(["任务名称与文件拓扑", "运行状态", "数据总量", "进度"])
         
-        self.del_opt = QCheckBox("删除本地文件")
-        self.del_opt.setChecked(True)
-        footer.addWidget(self.del_opt)
+        header = self.tree_view.header()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setStretchLastSection(False) 
         
-        footer.addStretch()
-        
-        self.btn = QPushButton("执行清理")
-        self.btn.setEnabled(False)
-        self.btn.setFixedSize(110, 34)
-        footer.addWidget(self.btn)
-        
-        layout.addWidget(footer_wrapper)
+        self.tree_view.setAlternatingRowColors(True)
+        self.tree_view.setFrameShape(QFrame.NoFrame)
+        main_layout.addWidget(self.tree_view)
 
-        self.btn.clicked.connect(self.run_del)
-        self.worker = SearchThread(file_paths)
-        self.worker.finished_signal.connect(self.populate)
-        self.worker.start()
-
-    def populate(self, results):
-        self.torrent_list = results
-        self.info.setText(f"匹配到 {len(results)} 个关联任务：")
-        self.table.setRowCount(len(results))
+        control_layout = QHBoxLayout()
+        self.chk_delete_files = QCheckBox("同时从磁盘删除数据")
+        self.chk_delete_files.setChecked(True)
+        control_layout.addWidget(self.chk_delete_files)
+        control_layout.addStretch()
         
-        for i, t in enumerate(results):
-            chk_widget = QWidget()
-            chk_layout = QHBoxLayout(chk_widget)
-            chk = QCheckBox()
-            chk.setChecked(True)
-            chk_layout.addWidget(chk)
-            chk_layout.setAlignment(Qt.AlignCenter)
-            chk_layout.setContentsMargins(0, 0, 0, 0)
-            self.table.setCellWidget(i, 0, chk_widget)
-            
-            self.table.setItem(i, 1, QTableWidgetItem(t['name']))
-            self.table.setItem(i, 2, QTableWidgetItem(get_status_cn(t['state'])))
-            
-            size_gb = t['total_size'] / (1024**3)
-            self.table.setItem(i, 3, QTableWidgetItem(f"{size_gb:.2f} GB"))
-            self.table.setItem(i, 4, QTableWidgetItem(f"{int(t['progress'] * 100)}%"))
-            
-        if results:
-            self.btn.setEnabled(True)
-        else:
-            self.info.setText("未匹配到任何任务")
+        self.btn_execute = QPushButton("执行清理")
+        self.btn_execute.setEnabled(False)
+        self.btn_execute.setFixedSize(140, 40)
+        self.btn_execute.clicked.connect(self._on_execute_clicked)
+        control_layout.addWidget(self.btn_execute)
+        main_layout.addLayout(control_layout)
 
-    def run_del(self):
-        hashes = []
-        for i in range(self.table.rowCount()):
-            chk_widget = self.table.cellWidget(i, 0)
-            chk = chk_widget.layout().itemAt(0).widget()
-            if chk.isChecked():
-                hashes.append(self.torrent_list[i]['hash'])
-        
-        if not hashes:
-            self.close()
-            return
-
-        self.btn.setEnabled(False)
-        self.btn.setText("正在删除...")
-        QApplication.processEvents() # 刷新UI
-
+    def _authenticate_and_start(self):
         try:
-            # 1. 确保重新登录获取新鲜 Cookie
-            login_resp = self.session.post(f"{QBT_URL}/api/v2/auth/login", 
-                                          data={'username': QBT_USER, 'password': QBT_PASS}, 
-                                          timeout=3)
-            
-            if "Ok" in login_resp.text:
-                # 2. 组装删除请求 (API: torrents/delete)
-                df = "true" if self.del_opt.isChecked() else "false"
-                # 注意：hashes 必须用 | 分隔
-                del_url = f"{QBT_URL}/api/v2/torrents/delete"
-                self.session.post(del_url, data={'hashes': '|'.join(hashes), 'deleteFiles': df}, timeout=5)
+            resp = self.session.post(f"{QBT_URL}/api/v2/auth/login", 
+                                   data={'username': QBT_USER, 'password': QBT_PASS}, timeout=5)
+            if resp.status_code == 200 and resp.text.strip() == "Ok.":
+                self.worker = SearchWorker(self.file_paths, self.session.cookies.get_dict())
+                self.worker.finished_signal.connect(self._on_data_ready)
+                self.worker.start()
+            else:
+                msg = f"WebAPI 拒绝访问: {resp.text.strip()}"
+                self.status_label.setText(f"Error: {msg}")
+                QMessageBox.critical(self, "认证失败", msg)
         except Exception as e:
-            print(f"删除失败: {e}")
+            self.status_label.setText("Error: 连接异常。")
+            QMessageBox.critical(self, "连接异常", f"无法访问 qBittorrent: {e}")
+
+    def _on_data_ready(self, results):
+        if self.worker:
+            self.worker.finished_signal.disconnect()
+            self.worker.deleteLater()
+            self.worker = None
+        
+        self.tree_view.clear()
+        gray_brush = QBrush(QColor(Qt.gray))
+
+        for t in results:
+            parent = QTreeWidgetItem(self.tree_view)
+            parent.setText(0, t['name'])
+            parent.setText(1, TorrentState.translate(t['state']))
+            parent.setText(2, f"{t['total_size'] / (1024**3):.2f} GB")
+            parent.setText(3, f"{int(t['progress'] * 100)}%")
+            parent.setCheckState(0, Qt.Checked)
+            parent.setData(0, Qt.UserRole, t['hash'])
             
-        self.close()
+            font = parent.font(0)
+            font.setBold(True)
+            parent.setFont(0, font)
+
+            for file_path in t.get('file_content_map', []):
+                child = QTreeWidgetItem(parent)
+                child.setText(0, f"⌞ {file_path}")
+                child.setFlags(child.flags() & ~Qt.ItemIsUserCheckable)
+                child.setForeground(0, gray_brush)
+
+        if results:
+            self.status_label.setText(f"Success: 匹配到 {len(results)} 个任务。")
+            self.btn_execute.setEnabled(True)
+        else:
+            self.status_label.setText("Notice: 未发现匹配任务。")
+
+    def _on_execute_clicked(self):
+        target_hashes = []
+        for i in range(self.tree_view.topLevelItemCount()):
+            item = self.tree_view.topLevelItem(i)
+            if item.checkState(0) == Qt.Checked:
+                target_hashes.append(item.data(0, Qt.UserRole))
+        
+        if not target_hashes: return
+
+        confirm = QMessageBox.question(self, "清理确认", 
+                                     f"确定要从队列移除选中的 {len(target_hashes)} 个任务吗？",
+                                     QMessageBox.Yes | QMessageBox.No)
+        
+        if confirm == QMessageBox.Yes:
+            self.btn_execute.setEnabled(False)
+            self.status_label.setText("Status: 正在执行异步删除...")
+            
+            self.del_worker = DeleteWorker(target_hashes, self.chk_delete_files.isChecked())
+            self.del_worker.finished_signal.connect(self._on_delete_finished)
+            self.del_worker.start()
+
+    def _on_delete_finished(self, success, message):
+        if self.del_worker:
+            self.del_worker.deleteLater()
+            self.del_worker = None
+            
+        if success:
+            QMessageBox.information(self, "操作完成", "选定的任务已成功清理。")
+            self.close()
+        else:
+            QMessageBox.critical(self, "操作失败", f"删除过程异常:\n{message}")
+            self.btn_execute.setEnabled(True)
+            self.status_label.setText("Error: 操作失败。")
+
+    def closeEvent(self, event):
+        is_searching = self.worker and self.worker.isRunning()
+        is_deleting = self.del_worker and self.del_worker.isRunning()
+        
+        if is_searching or is_deleting:
+            msg = "检索任务正在进行" if is_searching else "删除任务正在执行"
+            reply = QMessageBox.question(self, "确认退出", 
+                                       f"{msg}，强制退出可能导致操作不完整，是否继续？",
+                                       QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
     if len(sys.argv) > 1:
+        app = QApplication(sys.argv)
         gui = Reaper(sys.argv[1:])
         gui.show()
         sys.exit(app.exec())
+    else:
+        print("Usage: python reaper.py <file_path1> <file_path2> ...")
+        sys.exit(1)
