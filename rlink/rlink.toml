@@ -1,9 +1,15 @@
-target_root = "/mnt/media/all_links"
+# 配置文件使用 [[tasks]] 结构
+[[tasks]]
+name = "movie"
+target_root = "/home/ling/media/movies"
+link_mode = "hardlink"
+source = "/mnt/storage/raw_movies"
+patterns = ["**/*.mkv"]
+ignore_patterns = ["**/EXTRAS/**", "**/Sample/**"]
 
-[[sources]]
-path = "/mnt/disk_a/downloads"
-patterns = ["*.mkv", "*.mp4", "*.iso"]
-
-[[sources]]
-path = "/mnt/nfs_share/movies"
-patterns = ["*.mkv"]
+[[tasks]]
+name = "anime"
+target_root = "/home/ling/media/anime"
+link_mode = "symlink"
+source = "/mnt/storage/raw_anime"
+patterns = ["**/*.mkv", "**/*.mp4"]
