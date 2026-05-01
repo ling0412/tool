@@ -1,15 +1,33 @@
-# 配置文件使用 [[tasks]] 结构
 [[tasks]]
 name = "movie"
 target_root = "/home/ling/media/movies"
-link_mode = "hardlink"
-source = "/mnt/storage/raw_movies"
+link_mode = "hardlink"      # 物理同分区，使用硬链接
+safety_threshold = 100      # 电影数量较多，调高清理阈值,默认值50
+# sources 是一个数组，每个元素包含 path, patterns 等
+[[tasks.sources]]
+path = "/mnt/storage/raw_movies"
 patterns = ["**/*.mkv"]
 ignore_patterns = ["**/EXTRAS/**", "**/Sample/**"]
+tree = true                # 保持原始目录树结构
 
 [[tasks]]
 name = "anime"
 target_root = "/home/ling/media/anime"
-link_mode = "symlink"
-source = "/mnt/storage/raw_anime"
+link_mode = "symlink"      # 默认使用软链接
+[[tasks.sources]]
+path = "/mnt/storage/raw_anime"
 patterns = ["**/*.mkv", "**/*.mp4"]
+# tree 默认为 true，若设为 false 则所有文件会平铺在 target_root
+tree = true
+
+[[tasks]]
+name = "manga_translated"
+target_root = "/home/ling/media/manga"
+link_mode = "symlink"
+# 多源聚合示例：将两个不同路径的内容聚合到一个目标
+[[tasks.sources]]
+path = "/mnt/storage/manga_new"
+patterns = ["**/*.zip", "**/*.cbz"]
+[[tasks.sources]]
+path = "/home/ling/downloads/finished_manga"
+patterns = ["**/*.zip"]
