@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QTimer
 # 这些值将作为 PROTONPATH 环境变量的值
 PROTON_PATHS = {
     "GE-Proton": "GE-Proton",  
+    "Cachyos-Proton": "Cachyos-Proton",
     "UMU-Proton": "UMU-Proton",
     "自定义": "", # 选择“自定义”时，使用 custom_proton_path_input 的值
 }
@@ -115,8 +116,6 @@ class CustomLauncher(QWidget):
         self.store_input = QLineEdit("")
         self.store_input.setPlaceholderText("例如: gog / egs / itchio")
         
-        # 新增 -pf_tricks 输入框
-        # 提示修改为：将被放置在命令末尾
         pf_trick_label = QLabel("-pf_tricks (逗号分隔, 例: x,y, 将被放置在命令末尾):")
         self.pf_tricks_input = QLineEdit("")
         self.pf_tricks_input.setPlaceholderText("如: d3dcompiler_47, mf")
@@ -125,8 +124,8 @@ class CustomLauncher(QWidget):
         umu_params_layout.addWidget(self.gameid_input, 0, 1)
         umu_params_layout.addWidget(store_label, 1, 0)
         umu_params_layout.addWidget(self.store_input, 1, 1)
-        umu_params_layout.addWidget(pf_trick_label, 2, 0) # 新增
-        umu_params_layout.addWidget(self.pf_tricks_input, 2, 1) # 新增
+        umu_params_layout.addWidget(pf_trick_label, 2, 0)
+        umu_params_layout.addWidget(self.pf_tricks_input, 2, 1)
         
         env_layout.addWidget(umu_params_group)
         
@@ -153,10 +152,13 @@ class CustomLauncher(QWidget):
         self.proton_hdr_checkbox.setChecked(False)
         quick_config_layout.addWidget(self.proton_hdr_checkbox, 1, 1)
         
-        # 新增 PROTON_VERB=runinprefix 选项
         self.proton_verb_checkbox = QCheckBox("PROTON_VERB=runinprefix")
         self.proton_verb_checkbox.setChecked(False)
         quick_config_layout.addWidget(self.proton_verb_checkbox, 1, 2)
+
+        self.keep_terminal_checkbox = QCheckBox("保持终端打开 (debug)")
+        self.keep_terminal_checkbox.setChecked(False)
+        quick_config_layout.addWidget(self.keep_terminal_checkbox, 2, 0)
         
         env_layout.addWidget(quick_config_group)
         main_layout.addWidget(env_group)
@@ -259,10 +261,19 @@ class CustomLauncher(QWidget):
         launch_button = QPushButton("使用 foot 启动游戏")
         launch_button.clicked.connect(self.launch_game)
         
+        # 预览标签和复制按钮的布局
+        preview_layout = QHBoxLayout()
         self.preview_label = QLabel("最终运行命令:")
         self.preview_label.setStyleSheet("color: grey; font-size: 10pt;")
+        preview_layout.addWidget(self.preview_label)
         
-        main_layout.addWidget(self.preview_label)
+        copy_button = QPushButton("复制命令")
+        copy_button.setMaximumWidth(100)
+        copy_button.clicked.connect(self.copy_command_to_clipboard)
+        preview_layout.addWidget(copy_button)
+        preview_layout.addStretch()
+        
+        main_layout.addLayout(preview_layout)
         main_layout.addWidget(launch_button)
 
         self.setLayout(main_layout)
@@ -277,7 +288,7 @@ class CustomLauncher(QWidget):
         # Umu 专用参数
         self.gameid_input.textChanged.connect(self.update_command_preview)
         self.store_input.textChanged.connect(self.update_command_preview)
-        self.pf_tricks_input.textChanged.connect(self.update_command_preview) # 新增 pf_tricks 监听
+        self.pf_tricks_input.textChanged.connect(self.update_command_preview)
         
         # 快速开关
         self.gamemode_checkbox.stateChanged.connect(self.update_command_preview)
@@ -285,7 +296,8 @@ class CustomLauncher(QWidget):
         self.winedll_checkbox.stateChanged.connect(self.update_command_preview)
         self.proton_hdr_checkbox.stateChanged.connect(self.update_command_preview)
         self.proton_wayland_checkbox.stateChanged.connect(self.update_command_preview)
-        self.proton_verb_checkbox.stateChanged.connect(self.update_command_preview) # 新增 PROTON_VERB 监听
+        self.proton_verb_checkbox.stateChanged.connect(self.update_command_preview)
+        self.keep_terminal_checkbox.stateChanged.connect(self.update_command_preview)
         
         # Gamescope
         self.gamescope_checkbox.toggled.connect(self.handle_gamescope_switch)
@@ -409,7 +421,7 @@ class CustomLauncher(QWidget):
             
             "gameid_input": self.gameid_input.text(),
             "store_input": self.store_input.text(),
-            "pf_tricks_input": self.pf_tricks_input.text(), # 新增保存
+            "pf_tricks_input": self.pf_tricks_input.text(),
             
             "env_input": self.env_input.text(),
             "args_input": self.args_input.text(),
@@ -420,7 +432,8 @@ class CustomLauncher(QWidget):
             
             "proton_hdr_checked": self.proton_hdr_checkbox.isChecked(),
             "proton_wayland_checked": self.proton_wayland_checkbox.isChecked(),
-            "proton_verb_checked": self.proton_verb_checkbox.isChecked(), # 新增保存
+            "proton_verb_checked": self.proton_verb_checkbox.isChecked(),
+            "keep_terminal_checked": self.keep_terminal_checkbox.isChecked(),
             
             "gamescope_checked": self.gamescope_checkbox.isChecked(),
             "w_input": self.w_input.text(),
@@ -467,7 +480,7 @@ class CustomLauncher(QWidget):
             # 恢复 Umu 专用参数 (GAMEID 使用默认值，除非配置文件中有)
             self.gameid_input.setText(config_data.get("gameid_input", "0"))
             self.store_input.setText(config_data.get("store_input", ""))
-            self.pf_tricks_input.setText(config_data.get("pf_tricks_input", "")) # 恢复 pf_tricks
+            self.pf_tricks_input.setText(config_data.get("pf_tricks_input", ""))
 
             # 恢复 CheckBoxes
             self.mangohud_checkbox.setChecked(config_data.get("mangohud_checked", True))
@@ -475,7 +488,8 @@ class CustomLauncher(QWidget):
             self.winedll_checkbox.setChecked(config_data.get("winedll_checked", False))
             self.proton_hdr_checkbox.setChecked(config_data.get("proton_hdr_checked", False))
             self.proton_wayland_checkbox.setChecked(config_data.get("proton_wayland_checked", False))
-            self.proton_verb_checkbox.setChecked(config_data.get("proton_verb_checked", False)) # 恢复 PROTON_VERB
+            self.proton_verb_checkbox.setChecked(config_data.get("proton_verb_checked", False))
+            self.keep_terminal_checkbox.setChecked(config_data.get("keep_terminal_checked", False))
             
             # Gamescope 配置
             self.gamescope_checkbox.setChecked(config_data.get("gamescope_checked", False))
@@ -638,7 +652,14 @@ class CustomLauncher(QWidget):
 
         preview_text = f"最终运行命令: {' '.join(display_cmd).strip()}"
         self.preview_label.setText(preview_text)
+        # 保存完整命令用于复制
+        self.full_command = ' '.join(display_cmd).strip()
 
+    def copy_command_to_clipboard(self):
+        """将完整命令复制到剪贴板"""
+        if hasattr(self, 'full_command') and self.full_command:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(self.full_command)
 
     def launch_game(self):
         """执行游戏启动逻辑，通过 foot 终端运行"""
@@ -679,14 +700,31 @@ class CustomLauncher(QWidget):
         
         # 5. 最终在 foot 中执行的完整 bash 命令
         full_command_in_foot = f"{env_string} {final_run_cmd}".strip()
-        bash_command = full_command_in_foot 
+
+        # 检查用户是否勾选了“保持终端打开”
+        should_keep_open = self.keep_terminal_checkbox.isChecked()
+
+        if should_keep_open:
+            bash_command = full_command_in_foot + " && echo '命令执行完毕，按回车退出...' && read"
+        else:
+            # 仅在异常退出时等待
+            bash_command = (
+                f"{full_command_in_foot}; "
+                "EXIT_CODE=$?; " # 捕获退出码
+                "if [ $EXIT_CODE -ne 0 ]; then "
+                "  echo '-------------------------------------------------------'; "
+                "  echo \"警告：游戏进程异常退出 (Exit Code: $EXIT_CODE)\"; "
+                "  echo '日志已捕获。请检查上方信息或按回车退出...'; "
+                "  read; "
+                "fi"
+            )
         
         # 6. 构造 foot 启动命令
         foot_cmd = [
             "foot", 
             "-T", f"日志: {os.path.basename(self.exe_path)}",
             "-e", "bash", "-c",
-            bash_command + " && echo '命令执行完毕，按任意键退出...' && read" 
+            bash_command
         ]
         
         try:
