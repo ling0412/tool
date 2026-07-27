@@ -171,6 +171,7 @@ class FFmpegGenerator(QWidget):
         self._update_metrics_preview()
         self._handle_image_format_change(self.img_format_combo.currentText())
         self._handle_cover_mode_change(self.cover_mode_combo.currentText())
+        self._update_trim_preview()
     
     # ===========================
     # 初始化方法
@@ -210,6 +211,7 @@ class FFmpegGenerator(QWidget):
         tab_widget.addTab(self._create_metrics_section(), "质量分析")
         tab_widget.addTab(self._create_image_section(), "图片转码")
         tab_widget.addTab(self._create_cover_section(), "视频封面")
+        tab_widget.addTab(self._create_trim_section(), "视频裁剪")
         
         self.tab_widget = tab_widget
         main_layout.addWidget(tab_widget)
@@ -338,6 +340,31 @@ class FFmpegGenerator(QWidget):
         layout.addWidget(self.threads_input, row, 1, Qt.AlignmentFlag.AlignLeft)
         row += 1
         
+        # 输出分辨率
+        self.scale_width_label = QLabel("输出分辨率:")
+        self.scale_width_input = QSpinBox()
+        self.scale_width_input.setRange(0, 7680)
+        self.scale_width_input.setValue(0)
+        self.scale_width_input.setSpecialValueText("原始")
+        self.scale_width_input.setSuffix(" px")
+        self.scale_width_input.setMaximumWidth(100)
+        
+        self.scale_height_input = QSpinBox()
+        self.scale_height_input.setRange(0, 4320)
+        self.scale_height_input.setValue(0)
+        self.scale_height_input.setSpecialValueText("原始")
+        self.scale_height_input.setSuffix(" px")
+        self.scale_height_input.setMaximumWidth(100)
+        
+        scale_row = QHBoxLayout()
+        scale_row.addWidget(self.scale_width_label)
+        scale_row.addWidget(self.scale_width_input)
+        scale_row.addWidget(QLabel("x"))
+        scale_row.addWidget(self.scale_height_input)
+        scale_row.addStretch(1)
+        layout.addLayout(scale_row, row, 0, 1, 2)
+        row += 1
+        
         # 音频编码器
         self.acodec_combo = QComboBox()
         self.acodec_combo.addItems(AUDIO_CODECS)
@@ -416,7 +443,7 @@ class FFmpegGenerator(QWidget):
             hbox.addWidget(self.image_preview_label)
             hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
         
-        else:  # cover
+        elif preview_type == "cover":
             self.cover_preview_label = QLabel("封面 FFmpeg 命令:")
             self.cover_preview_label.setFrameShape(QLabel.Shape.StyledPanel)
             self.cover_preview_label.setFrameShadow(QLabel.Shadow.Sunken)
@@ -429,6 +456,21 @@ class FFmpegGenerator(QWidget):
             copy_btn.setMaximumWidth(100)
             
             hbox.addWidget(self.cover_preview_label)
+            hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        
+        else:  # trim
+            self.trim_preview_label = QLabel("裁剪 FFmpeg 命令:")
+            self.trim_preview_label.setFrameShape(QLabel.Shape.StyledPanel)
+            self.trim_preview_label.setFrameShadow(QLabel.Shadow.Sunken)
+            self.trim_preview_label.setWordWrap(True)
+            self.trim_preview_label.setContentsMargins(10, 10, 10, 10)
+            
+            copy_btn = QPushButton("复制命令")
+            copy_btn.clicked.connect(lambda: self._copy_command(
+                self._generate_trim_command()))
+            copy_btn.setMaximumWidth(100)
+            
+            hbox.addWidget(self.trim_preview_label)
             hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
         
         return hbox
@@ -651,6 +693,66 @@ class FFmpegGenerator(QWidget):
         
         return group
     
+    def _create_trim_section(self):
+        """创建视频裁剪区域"""
+        group = QGroupBox("视频裁剪")
+        layout = QVBoxLayout(group)
+
+        file_group = QGroupBox("输入/输出文件")
+        file_layout = QGridLayout(file_group)
+
+        self.trim_input_path = QLineEdit()
+        self.trim_input_path.setPlaceholderText("video.mp4")
+        trim_input_btn = QPushButton("选择...")
+        trim_input_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.trim_input_path, is_save_dialog=False))
+
+        file_layout.addWidget(QLabel("视频文件:"), 0, 0)
+        file_layout.addWidget(self.trim_input_path, 0, 1)
+        file_layout.addWidget(trim_input_btn, 0, 2)
+
+        self.trim_output_path = QLineEdit()
+        self.trim_output_path.setPlaceholderText("video_cut.mp4")
+        trim_output_btn = QPushButton("选择...")
+        trim_output_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.trim_output_path, is_save_dialog=True))
+
+        file_layout.addWidget(QLabel("输出文件:"), 1, 0)
+        file_layout.addWidget(self.trim_output_path, 1, 1)
+        file_layout.addWidget(trim_output_btn, 1, 2)
+
+        layout.addWidget(file_group)
+
+        time_group = QGroupBox("时间裁剪 (可选，留空则不裁剪)")
+        time_layout = QGridLayout(time_group)
+
+        self.trim_start = QLineEdit()
+        self.trim_start.setPlaceholderText("00:00:00")
+        time_layout.addWidget(QLabel("开始时间 (-ss):"), 0, 0)
+        time_layout.addWidget(self.trim_start, 0, 1)
+
+        self.trim_end = QLineEdit()
+        self.trim_end.setPlaceholderText("留空 = 视频末尾")
+        time_layout.addWidget(QLabel("结束时间 (-to):"), 1, 0)
+        time_layout.addWidget(self.trim_end, 1, 1)
+
+        self.trim_duration = QLineEdit()
+        self.trim_duration.setPlaceholderText("留空 = 与 -to 互斥")
+        time_layout.addWidget(QLabel("持续时长 (-t):"), 2, 0)
+        time_layout.addWidget(self.trim_duration, 2, 1)
+
+        layout.addWidget(time_group)
+
+        layout.addLayout(self._create_command_preview("trim"))
+
+        launch_btn = QPushButton("运行视频裁剪 FFmpeg 命令 (foot)")
+        launch_btn.clicked.connect(lambda: self._execute_ffmpeg(
+            self._generate_trim_command(), "FFmpeg 视频裁剪日志"))
+        launch_btn.setMinimumHeight(35)
+        layout.addWidget(launch_btn)
+
+        return group
+    
     def _bind_events(self):
         """绑定所有输入组件的更改事件"""
         # 输入文件相关
@@ -673,6 +775,8 @@ class FFmpegGenerator(QWidget):
         self.bitrate_input.valueChanged.connect(self._update_encoding_preview)
         self.vaapi_device_input.textChanged.connect(self._update_encoding_preview)
         self.threads_input.valueChanged.connect(self._update_encoding_preview)
+        self.scale_width_input.valueChanged.connect(self._update_encoding_preview)
+        self.scale_height_input.valueChanged.connect(self._update_encoding_preview)
         self.audio_bitrate_input.valueChanged.connect(self._update_encoding_preview)
         self.extra_args_input.textChanged.connect(self._update_encoding_preview)
         
@@ -699,6 +803,14 @@ class FFmpegGenerator(QWidget):
         self.cover_mode_combo.currentTextChanged.connect(self._handle_cover_mode_change)
         self.cover_image_path.textChanged.connect(self._update_cover_preview)
         self.cover_output_path.textChanged.connect(self._update_cover_preview)
+        
+        # 视频裁剪相关
+        self.trim_input_path.textChanged.connect(self._update_trim_preview)
+        self.trim_input_path.textChanged.connect(self._update_trim_output_path)
+        self.trim_output_path.textChanged.connect(self._update_trim_preview)
+        self.trim_start.textChanged.connect(self._update_trim_preview)
+        self.trim_end.textChanged.connect(self._update_trim_preview)
+        self.trim_duration.textChanged.connect(self._update_trim_preview)
     
     # ===========================
     # 工具方法
@@ -794,6 +906,9 @@ class FFmpegGenerator(QWidget):
         self.quality_preset_combo.setEnabled(enabled)
         self.quality_preset_label.setEnabled(enabled)
         self.vaapi_label.setEnabled(enabled)
+        self.scale_width_label.setEnabled(enabled)
+        self.scale_width_input.setEnabled(enabled)
+        self.scale_height_input.setEnabled(enabled)
         
         if not enabled:
             self.vaapi_device_input.setEnabled(False)
@@ -1084,9 +1199,25 @@ class FFmpegGenerator(QWidget):
         if extra_input:
             command.extend(["-i", extra_input])
         
-        # 视频滤镜（VAAPI 上传）
+        # 视频滤镜（缩放 + VAAPI 上传）
+        scale_w = self.scale_width_input.value()
+        scale_h = self.scale_height_input.value()
+        has_scale = scale_w > 0 or scale_h > 0
+        
+        vf_parts = []
+        if has_scale:
+            if scale_w > 0 and scale_h > 0:
+                vf_parts.append(f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=decrease")
+            elif scale_w > 0:
+                vf_parts.append(f"scale={scale_w}:-2")
+            else:
+                vf_parts.append(f"scale=-2:{scale_h}")
+        
         if vaapi_active:
-            command.extend(["-vf", "format=nv12,hwupload"])
+            vf_parts.append("format=nv12,hwupload")
+        
+        if vf_parts:
+            command.extend(["-vf", ",".join(vf_parts)])
         
         # 视频编码参数
         if not is_audio_only and vcodec != "copy":
@@ -1362,6 +1493,34 @@ class FFmpegGenerator(QWidget):
         
         return command
     
+    def _generate_trim_command(self):
+        """生成视频裁剪命令"""
+        command = ["ffmpeg", "-hide_banner", "-y"]
+
+        input_path = self.trim_input_path.text().strip()
+        output_path = self.trim_output_path.text().strip()
+
+        if not input_path or not output_path:
+            return ["echo", "错误: 请指定输入和输出文件路径"]
+
+        start = self.trim_start.text().strip()
+        end = self.trim_end.text().strip()
+        duration = self.trim_duration.text().strip()
+
+        if start:
+            command.extend(["-ss", start])
+
+        if end:
+            command.extend(["-to", end])
+        elif duration:
+            command.extend(["-t", duration])
+
+        command.extend(["-i", input_path, "-c", "copy",
+                        "-avoid_negative_ts", "make_zero"])
+
+        command.append(output_path)
+        return command
+    
     # ===========================
     # 预览更新
     # ===========================
@@ -1404,6 +1563,27 @@ class FFmpegGenerator(QWidget):
         preview_text = f"封面 FFmpeg 命令:\n\n<pre>{command_str}</pre>"
         self.cover_preview_label.setText(preview_text)
         self.cover_preview_label.setTextFormat(Qt.TextFormat.RichText)
+    
+    def _update_trim_preview(self):
+        """更新视频裁剪命令预览"""
+        command_list = self._generate_trim_command()
+        command_str = " ".join(shlex.quote(p) for p in command_list)
+
+        preview_text = f"裁剪 FFmpeg 命令:\n\n<pre>{command_str}</pre>"
+        self.trim_preview_label.setText(preview_text)
+        self.trim_preview_label.setTextFormat(Qt.TextFormat.RichText)
+
+    def _update_trim_output_path(self):
+        """根据输入视频路径自动生成裁剪输出路径"""
+        input_path = self.trim_input_path.text().strip()
+        if not input_path:
+            return
+
+        dir_name = os.path.dirname(os.path.abspath(input_path))
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        ext = os.path.splitext(input_path)[1] or ".mp4"
+        output = os.path.join(dir_name, f"{base_name}_cut{ext}")
+        self.trim_output_path.setText(output)
     
     # ===========================
     # 命令执行
