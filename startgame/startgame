@@ -20,7 +20,12 @@ PROTON_PATHS = {
 
 # --- 2. WINEPREFIX 路径预设 ---
 HOME_DIR = os.path.expanduser("~")
-DEFAULT_GLOBAL_PFX = os.path.join(HOME_DIR, ".local", "share", "proton-pfx", "0")
+PFX_BASE = os.path.join(HOME_DIR, ".local", "share", "proton-pfx")
+PROTON_PFX_MAP = {
+    "GE-Proton": os.path.join(PFX_BASE, "0"),
+    "Cachyos-Proton": os.path.join(PFX_BASE, "1"),
+    "UMU-Proton": os.path.join(PFX_BASE, "2"),
+}
 
 # --- 3. 配置保存/加载文件名 ---
 CONFIG_DIR_NAME = "startgame"
@@ -77,8 +82,10 @@ class CustomLauncher(QWidget):
         
         # 3. WINEPREFIX 路径选择
         self.wine_pfx_checkbox = QCheckBox(f"使用启动目录 ./{CONFIG_DIR_NAME}/{LOCAL_PFX_DIR_NAME}")
-        self.wine_pfx_checkbox.setChecked(False) 
-        top_layout.addWidget(QLabel(f"WINEPREFIX: 默认路径 {DEFAULT_GLOBAL_PFX}"), 2, 0)
+        self.wine_pfx_checkbox.setChecked(False)
+        default_pfx = PROTON_PFX_MAP.get("GE-Proton", os.path.join(PFX_BASE, "0"))
+        self.pfx_label = QLabel(f"WINEPREFIX: {default_pfx}")
+        top_layout.addWidget(self.pfx_label, 2, 0)
         top_layout.addWidget(self.wine_pfx_checkbox, 2, 1)
 
         main_layout.addWidget(top_group)
@@ -138,27 +145,38 @@ class CustomLauncher(QWidget):
         quick_config_layout.addWidget(self.mangohud_checkbox, 0, 0)
 
         self.gamemode_checkbox = QCheckBox("启用 gamemoderun")
+        self.gamemode_checkbox.setChecked(True)
         quick_config_layout.addWidget(self.gamemode_checkbox, 0, 1)
 
         self.winedll_checkbox = QCheckBox('WINEDLLOVERRIDES="winhttp=n,b"')
         self.winedll_checkbox.setChecked(False) 
-        quick_config_layout.addWidget(self.winedll_checkbox, 0, 2)
+        quick_config_layout.addWidget(self.winedll_checkbox, 0, 3)
 
         self.proton_wayland_checkbox = QCheckBox("启用实验性Wayland驱动")
-        self.proton_wayland_checkbox.setChecked(False)
+        self.proton_wayland_checkbox.setChecked(True)
         quick_config_layout.addWidget(self.proton_wayland_checkbox, 1, 0)
 
         self.proton_hdr_checkbox = QCheckBox("PROTON_ENABLE_HDR=1")
-        self.proton_hdr_checkbox.setChecked(False)
+        self.proton_hdr_checkbox.setChecked(True)
         quick_config_layout.addWidget(self.proton_hdr_checkbox, 1, 1)
         
         self.proton_verb_checkbox = QCheckBox("PROTON_VERB=runinprefix")
         self.proton_verb_checkbox.setChecked(False)
-        quick_config_layout.addWidget(self.proton_verb_checkbox, 1, 2)
+        quick_config_layout.addWidget(self.proton_verb_checkbox, 1, 3)
 
         self.keep_terminal_checkbox = QCheckBox("保持终端打开 (debug)")
         self.keep_terminal_checkbox.setChecked(False)
         quick_config_layout.addWidget(self.keep_terminal_checkbox, 2, 0)
+
+        self.proton_fsr4_upgrade_checkbox = QCheckBox("PROTON_FSR4_UPGRADE=1")
+        self.proton_fsr4_upgrade_checkbox.setChecked(False)
+        quick_config_layout.addWidget(self.proton_fsr4_upgrade_checkbox, 0, 2)
+
+        self.proton_fsr4_indicator_checkbox = QCheckBox("PROTON_FSR4_INDICATOR=1")
+        self.proton_fsr4_indicator_checkbox.setChecked(False)
+        quick_config_layout.addWidget(self.proton_fsr4_indicator_checkbox, 1, 2)
+
+
         
         env_layout.addWidget(quick_config_group)
         main_layout.addWidget(env_group)
@@ -298,6 +316,8 @@ class CustomLauncher(QWidget):
         self.proton_wayland_checkbox.stateChanged.connect(self.update_command_preview)
         self.proton_verb_checkbox.stateChanged.connect(self.update_command_preview)
         self.keep_terminal_checkbox.stateChanged.connect(self.update_command_preview)
+        self.proton_fsr4_upgrade_checkbox.stateChanged.connect(self.update_command_preview)
+        self.proton_fsr4_indicator_checkbox.stateChanged.connect(self.update_command_preview)
         
         # Gamescope
         self.gamescope_checkbox.toggled.connect(self.handle_gamescope_switch)
@@ -325,6 +345,11 @@ class CustomLauncher(QWidget):
         """处理 PROTONPATH 切换，控制自定义输入框的启用/禁用"""
         is_custom = selected_name == "自定义"
         self.custom_proton_path_input.setEnabled(is_custom)
+        if is_custom:
+            default_pfx = os.path.join(PFX_BASE, "3")
+        else:
+            default_pfx = PROTON_PFX_MAP.get(selected_name, os.path.join(PFX_BASE, "0"))
+        self.pfx_label.setText(f"WINEPREFIX: {default_pfx}")
         self.update_command_preview()
 
     # Gamescope, Proton FSR 和 伪分辨率的互斥逻辑与 V2 保持一致，以保持代码简洁
@@ -520,7 +545,7 @@ class CustomLauncher(QWidget):
         selected_proton = self.proton_combo.currentText()
         proton_path = self.custom_proton_path_input.text().strip() if selected_proton == "自定义" else PROTON_PATHS[selected_proton].strip()
             
-        wine_prefix_path = os.path.join(self.game_dir, CONFIG_DIR_NAME, LOCAL_PFX_DIR_NAME) if self.wine_pfx_checkbox.isChecked() else DEFAULT_GLOBAL_PFX
+        wine_prefix_path = os.path.join(self.game_dir, CONFIG_DIR_NAME, LOCAL_PFX_DIR_NAME) if self.wine_pfx_checkbox.isChecked() else (os.path.join(PFX_BASE, "3") if selected_proton == "自定义" else PROTON_PFX_MAP.get(selected_proton, os.path.join(PFX_BASE, "0")))
         
         # --- 2. 环境变量 (Umu/Proton/额外) ---
         env_vars_list = []
@@ -550,6 +575,10 @@ class CustomLauncher(QWidget):
             env_vars_list.append("PROTON_ENABLE_WAYLAND=1")
         if self.proton_hdr_checkbox.isChecked() and all(not v.upper().startswith("PROTON_ENABLE_HDR=") for v in env_vars_list):
             env_vars_list.append("PROTON_ENABLE_HDR=1")
+        if self.proton_fsr4_upgrade_checkbox.isChecked() and all(not v.upper().startswith("PROTON_FSR4_UPGRADE=") for v in env_vars_list):
+            env_vars_list.append("PROTON_FSR4_UPGRADE=1")
+        if self.proton_fsr4_indicator_checkbox.isChecked() and all(not v.upper().startswith("PROTON_FSR4_INDICATOR=") for v in env_vars_list):
+            env_vars_list.append("PROTON_FSR4_INDICATOR=1")
 
         if not is_gamescope_enabled:
             # FSR 和伪分辨率

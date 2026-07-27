@@ -85,8 +85,8 @@ class DeleteWorker(QThread):
                                  data={'username': QBT_USER, 'password': QBT_PASS}, timeout=5)
                 auth_resp.raise_for_status()
                 
-                if auth_resp.text.strip() != "Ok.":
-                    raise RuntimeError(f"认证失败: {auth_resp.text.strip()}")
+                if not ((auth_resp.status_code == 200 and auth_resp.text.strip() == "Ok.") or auth_resp.status_code == 204):
+                    raise RuntimeError(f"认证失败 (HTTP {auth_resp.status_code}): {auth_resp.text.strip()}")
                 
                 endpoint = f"{QBT_URL}/api/v2/torrents/delete"
                 data = {
@@ -154,12 +154,12 @@ class Reaper(QMainWindow):
         try:
             resp = self.session.post(f"{QBT_URL}/api/v2/auth/login", 
                                    data={'username': QBT_USER, 'password': QBT_PASS}, timeout=5)
-            if resp.status_code == 200 and resp.text.strip() == "Ok.":
+            if (resp.status_code == 200 and resp.text.strip() == "Ok.") or resp.status_code == 204:
                 self.worker = SearchWorker(self.file_paths, self.session.cookies.get_dict())
                 self.worker.finished_signal.connect(self._on_data_ready)
                 self.worker.start()
             else:
-                msg = f"WebAPI 拒绝访问: {resp.text.strip()}"
+                msg = f"WebAPI 拒绝访问 (HTTP {resp.status_code}): {resp.text.strip()}"
                 self.status_label.setText(f"Error: {msg}")
                 QMessageBox.critical(self, "认证失败", msg)
         except Exception as e:
