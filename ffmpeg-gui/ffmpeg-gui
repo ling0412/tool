@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QMessageBox, QCheckBox, 
     QGridLayout, QGroupBox, QSpinBox, QFileDialog, QDialog, QTextEdit, 
-    QSizePolicy, QSpacerItem, QScrollArea
+    QSizePolicy, QSpacerItem, QScrollArea, QTabWidget
 )
 from PySide6.QtCore import Qt
 
@@ -25,21 +25,31 @@ SVTAV1_PRESETS = {
 }
 
 SW_RC_MODES = {
-    "CRF (Constant Rate Factor)": {"rc_mode": "CRF", "params": ["crf"]},
-    "CBR (Constant Bitrate)": {"rc_mode": "CBR", "params": ["bitrate"]},
-    "VBR (Variable Bitrate)": {"rc_mode": "VBR", "params": ["bitrate"]}
+    "CRF (Constant Rate Factor|恒定速率因子)": {"rc_mode": "CRF", "params": ["crf"]},
+    "CBR (Constant Bitrate|恒定码率)": {"rc_mode": "CBR", "params": ["bitrate"]},
+    "VBR (Variable Bitrate|动态码率)": {"rc_mode": "VBR", "params": ["bitrate"]}
 }
 
 VAAPI_RC_MODES = {
-    "CQP (Constant QP)": {"rc_mode": "CQP", "params": ["qp_p"]},
-    "CBR (Constant Bitrate)": {"rc_mode": "CBR", "params": ["bitrate"]},
-    "VBR (Variable Bitrate)": {"rc_mode": "VBR", "params": ["bitrate"]},
-    "ICQ (Intelligent CQ)": {"rc_mode": "ICQ", "params": ["qp_icq"]},
+    "CQP (Constant QP|固定量化参数)": {"rc_mode": "CQP", "params": ["qp_p"]},
+    "CBR (Constant Bitrate|固定码率)": {"rc_mode": "CBR", "params": ["bitrate"]},
+    "VBR (Variable Bitrate|动态码率)": {"rc_mode": "VBR", "params": ["bitrate"]},
+    "ICQ (Intelligent CQ|智能恒定)": {"rc_mode": "ICQ", "params": ["qp_icq"]},
     "QVBR (Quality VBR)": {"rc_mode": "QVBR", "params": ["bitrate", "qp_icq"]},
     "AVBR (Average VBR)": {"rc_mode": "AVBR", "params": ["bitrate"]}
 }
 
+VAAPI_QUALITY_CONFIG = {
+    "h264_vaapi": {"param": "-qp",              "range": (0, 51),  "default": 23, "label": "QP 值 (0-51, ↓越小越高):"},
+    "hevc_vaapi": {"param": "-qp",              "range": (0, 51),  "default": 25, "label": "QP 值 (0-51, ↓越小越高):"},
+    "av1_vaapi":  {"param": "-q:v",  "range": (0, 255), "default": 30, "label": "质量 (-q:v, 0-255, ↓越小越高):"},
+    "vp9_vaapi":  {"param": "-q:v",  "range": (0, 255), "default": 30, "label": "质量 (-q:v, 0-255, ↓越小越高):"},
+}
+
 AUDIO_EXTENSIONS = ['.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.opus']
+
+IMAGE_INPUT_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.avif',
+                          '.bmp', '.tiff', '.tif', '.gif', '.heic', '.heif']
 
 OUTPUT_EXTENSIONS = {
     "libx264": ".mp4", "libx265": ".mp4", "libsvtav1": ".mkv",
@@ -48,36 +58,78 @@ OUTPUT_EXTENSIONS = {
     "aac": ".mp3", "libmp3lame": ".mp3", "copy_audio": ".mp3"
 }
 
+IMAGE_FORMATS = ["JPG", "PNG", "WebP", "AVIF", "BMP", "TIFF"]
+
+IMAGE_FORMAT_EXT = {
+    "JPG": ".jpg", "PNG": ".png", "WebP": ".webp",
+    "AVIF": ".avif", "BMP": ".bmp", "TIFF": ".tiff"
+}
+
+IMAGE_QUALITY_CONFIG = {
+    "JPG":  {"param": "-q:v", "range": (2, 31),  "default": 3,
+             "label": "质量 (-q:v, 2-31, ↓越小越高):"},
+    "PNG":  {"param": "-compression_level", "range": (0, 9), "default": 6,
+             "label": "压缩等级 (0-9, 无损画质, 仅影响体积与速度):"},
+    "WebP": {"param": "-quality", "range": (0, 100), "default": 80,
+             "label": "质量 (-quality, 0-100, ↑越大越高):"},
+    "AVIF": {"param": "-crf", "range": (0, 63),  "default": 30,
+             "label": "CRF (-crf, 0-63, ↓越小越高):"},
+    "BMP":  {},
+    "TIFF": {},
+}
+
+COVER_MIME_MAP = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+}
+
 
 # ===========================
-# FFprobe 详情对话框
+# 媒体信息详情对话框
 # ===========================
 class FFprobeDetailsDialog(QDialog):
-    """显示 ffprobe 详细信息的模态对话框"""
-    
+    """显示媒体文件详细信息的模态对话框"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("输入文件详细信息 (ffprobe)")
+        self.setWindowTitle("媒体文件详细信息")
         self.setMinimumSize(850, 650)
         self._init_ui()
-    
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("ffprobe 返回的 JSON 数据:"))
-        
-        self.text_editor = QTextEdit()
-        self.text_editor.setReadOnly(True)
-        self.text_editor.setFontPointSize(10)
-        self.text_editor.setStyleSheet("font-family: 'monospace';")
-        layout.addWidget(self.text_editor)
-        
+
+        self.tab_widget = QTabWidget()
+
+        self.mediainfo_editor = QTextEdit()
+        self.mediainfo_editor.setReadOnly(True)
+        self.mediainfo_editor.setFontPointSize(10)
+        self.mediainfo_editor.setStyleSheet("font-family: 'monospace';")
+        self.tab_widget.addTab(self.mediainfo_editor, "MediaInfo")
+
+        self.ffprobe_editor = QTextEdit()
+        self.ffprobe_editor.setReadOnly(True)
+        self.ffprobe_editor.setFontPointSize(10)
+        self.ffprobe_editor.setStyleSheet("font-family: 'monospace';")
+        self.tab_widget.addTab(self.ffprobe_editor, "FFprobe")
+
+        layout.addWidget(self.tab_widget)
+
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
-    
-    def set_content(self, content):
-        """设置并显示格式化的 ffprobe 输出内容"""
-        self.text_editor.setText(content)
+
+    def set_ffprobe_content(self, content):
+        self.ffprobe_editor.setText(content)
+
+    def set_mediainfo_content(self, content):
+        self.mediainfo_editor.setText(content)
 
 
 # ===========================
@@ -93,6 +145,8 @@ class FFmpegGenerator(QWidget):
         # 初始化动态控件
         self._init_dynamic_widgets()
         
+        self._extra_args_error = None
+        
         # 构建 UI
         self._init_ui()
         
@@ -101,14 +155,22 @@ class FFmpegGenerator(QWidget):
         
         # 设置初始输入文件
         if input_file_path and os.path.exists(input_file_path):
-            self.input_path_input.setText(input_file_path)
-            self._update_output_path(input_file_path)
+            ext = os.path.splitext(input_file_path.lower())[1]
+            if ext in IMAGE_INPUT_EXTENSIONS:
+                self.img_input_path.setText(input_file_path)
+                self._update_image_output_path()
+                self.tab_widget.setCurrentIndex(2)
+            else:
+                self.input_path_input.setText(input_file_path)
+                self._update_output_path(input_file_path)
         
         # 初始化状态
         self._handle_vcodec_change(self.vcodec_combo.currentText())
         self._handle_input_path_change(self.input_path_input.text())
         self._update_encoding_preview()
         self._update_metrics_preview()
+        self._handle_image_format_change(self.img_format_combo.currentText())
+        self._handle_cover_mode_change(self.cover_mode_combo.currentText())
     
     # ===========================
     # 初始化方法
@@ -141,13 +203,16 @@ class FFmpegGenerator(QWidget):
     def _init_ui(self):
         """构建主界面"""
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(8, 8, 8, 8)
         
-        # 添加编码模块
-        main_layout.addWidget(self._create_encoding_section())
+        tab_widget = QTabWidget()
+        tab_widget.addTab(self._create_encoding_section(), "视频编码")
+        tab_widget.addTab(self._create_metrics_section(), "质量分析")
+        tab_widget.addTab(self._create_image_section(), "图片转码")
+        tab_widget.addTab(self._create_cover_section(), "视频封面")
         
-        # 添加质量分析模块
-        main_layout.addWidget(self._create_metrics_section())
+        self.tab_widget = tab_widget
+        main_layout.addWidget(tab_widget)
 
     def _create_encoding_section(self):
         """创建编码配置区域"""
@@ -321,7 +386,7 @@ class FFmpegGenerator(QWidget):
             hbox.addWidget(self.encoding_preview_label)
             hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
         
-        else:  # metrics
+        elif preview_type == "metrics":
             self.metrics_preview_label = QLabel("分析 FFmpeg 命令:")
             self.metrics_preview_label.setFrameShape(QLabel.Shape.StyledPanel)
             self.metrics_preview_label.setFrameShadow(QLabel.Shadow.Sunken)
@@ -334,6 +399,36 @@ class FFmpegGenerator(QWidget):
             copy_btn.setMaximumWidth(100)
             
             hbox.addWidget(self.metrics_preview_label)
+            hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        
+        elif preview_type == "image":
+            self.image_preview_label = QLabel("图片转码 FFmpeg 命令:")
+            self.image_preview_label.setFrameShape(QLabel.Shape.StyledPanel)
+            self.image_preview_label.setFrameShadow(QLabel.Shadow.Sunken)
+            self.image_preview_label.setWordWrap(True)
+            self.image_preview_label.setContentsMargins(10, 10, 10, 10)
+            
+            copy_btn = QPushButton("复制命令")
+            copy_btn.clicked.connect(lambda: self._copy_command(
+                self._generate_image_command()))
+            copy_btn.setMaximumWidth(100)
+            
+            hbox.addWidget(self.image_preview_label)
+            hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        
+        else:  # cover
+            self.cover_preview_label = QLabel("封面 FFmpeg 命令:")
+            self.cover_preview_label.setFrameShape(QLabel.Shape.StyledPanel)
+            self.cover_preview_label.setFrameShadow(QLabel.Shadow.Sunken)
+            self.cover_preview_label.setWordWrap(True)
+            self.cover_preview_label.setContentsMargins(10, 10, 10, 10)
+            
+            copy_btn = QPushButton("复制命令")
+            copy_btn.clicked.connect(lambda: self._copy_command(
+                self._generate_cover_command()))
+            copy_btn.setMaximumWidth(100)
+            
+            hbox.addWidget(self.cover_preview_label)
             hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
         
         return hbox
@@ -395,9 +490,166 @@ class FFmpegGenerator(QWidget):
         
         return group
     
-    # ===========================
-    # 事件绑定
-    # ===========================
+    def _create_image_section(self):
+        """创建图片转码区域"""
+        group = QGroupBox("图片转码")
+        layout = QVBoxLayout(group)
+        
+        # 文件输入/输出
+        file_group = QGroupBox("输入/输出图片")
+        file_layout = QGridLayout(file_group)
+        
+        self.img_input_path = QLineEdit()
+        self.img_input_path.setPlaceholderText("input.png")
+        img_input_btn = QPushButton("选择...")
+        img_input_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.img_input_path, is_save_dialog=False,
+            file_filter="Image Files (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.tiff *.tif *.gif);;All Files (*.*)"))
+        
+        file_layout.addWidget(QLabel("输入图片:"), 0, 0)
+        file_layout.addWidget(self.img_input_path, 0, 1)
+        file_layout.addWidget(img_input_btn, 0, 2)
+        
+        self.img_output_path = QLineEdit()
+        self.img_output_path.setPlaceholderText("output.jpg")
+        img_output_btn = QPushButton("选择...")
+        img_output_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.img_output_path, is_save_dialog=True,
+            file_filter="Image Files (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.tiff);;All Files (*.*)"))
+        
+        file_layout.addWidget(QLabel("输出图片:"), 1, 0)
+        file_layout.addWidget(self.img_output_path, 1, 1)
+        file_layout.addWidget(img_output_btn, 1, 2)
+        
+        layout.addWidget(file_group)
+        
+        # 格式与质量参数
+        fmt_group = QGroupBox("输出格式与参数")
+        fmt_layout = QGridLayout(fmt_group)
+        
+        self.img_format_combo = QComboBox()
+        self.img_format_combo.addItems(IMAGE_FORMATS)
+        self.img_format_combo.setCurrentText("JPG")
+        
+        fmt_layout.addWidget(QLabel("输出格式:"), 0, 0)
+        fmt_layout.addWidget(self.img_format_combo, 0, 1)
+        
+        self.img_quality_label = QLabel("质量:")
+        self.img_quality_input = QSpinBox()
+        self.img_quality_input.setRange(2, 31)
+        self.img_quality_input.setValue(3)
+        self.img_quality_input.setMaximumWidth(100)
+        
+        fmt_layout.addWidget(self.img_quality_label, 1, 0)
+        fmt_layout.addWidget(self.img_quality_input, 1, 1, Qt.AlignmentFlag.AlignLeft)
+        
+        layout.addWidget(fmt_group)
+        
+        # 缩放
+        scale_group = QGroupBox("缩放 (可选)")
+        scale_layout = QHBoxLayout(scale_group)
+        
+        scale_layout.addWidget(QLabel("宽度:"))
+        self.img_scale_width = QSpinBox()
+        self.img_scale_width.setRange(0, 7680)
+        self.img_scale_width.setValue(0)
+        self.img_scale_width.setSpecialValueText("不限制")
+        self.img_scale_width.setSuffix(" px")
+        self.img_scale_width.setMaximumWidth(120)
+        scale_layout.addWidget(self.img_scale_width)
+        
+        scale_layout.addWidget(QLabel("x"))
+        
+        scale_layout.addWidget(QLabel("高度:"))
+        self.img_scale_height = QSpinBox()
+        self.img_scale_height.setRange(0, 4320)
+        self.img_scale_height.setValue(0)
+        self.img_scale_height.setSpecialValueText("不限制")
+        self.img_scale_height.setSuffix(" px")
+        self.img_scale_height.setMaximumWidth(120)
+        scale_layout.addWidget(self.img_scale_height)
+        
+        scale_layout.addStretch(1)
+        
+        layout.addWidget(scale_group)
+        
+        # 白底填充
+        self.img_white_fill = QCheckBox("透明区域填充白色 (PNG/WebP → JPG 时建议勾选)")
+        layout.addWidget(self.img_white_fill)
+        
+        # 命令预览
+        layout.addLayout(self._create_command_preview("image"))
+        
+        # 执行按钮
+        launch_btn = QPushButton("运行图片转码 FFmpeg 命令 (foot)")
+        launch_btn.clicked.connect(lambda: self._execute_ffmpeg(
+            self._generate_image_command(), "FFmpeg 图片转码日志"))
+        launch_btn.setMinimumHeight(35)
+        layout.addWidget(launch_btn)
+        
+        return group
+    
+    def _create_cover_section(self):
+        """创建视频封面区域"""
+        group = QGroupBox("视频封面")
+        layout = QVBoxLayout(group)
+        
+        # 文件与模式选择
+        file_group = QGroupBox("输入/输出文件")
+        file_layout = QGridLayout(file_group)
+        
+        self.cover_video_path = QLineEdit()
+        self.cover_video_path.setPlaceholderText("video.mp4")
+        cover_video_btn = QPushButton("选择...")
+        cover_video_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.cover_video_path, is_save_dialog=False))
+        
+        file_layout.addWidget(QLabel("视频文件:"), 0, 0)
+        file_layout.addWidget(self.cover_video_path, 0, 1)
+        file_layout.addWidget(cover_video_btn, 0, 2)
+        
+        self.cover_mode_combo = QComboBox()
+        self.cover_mode_combo.addItems(["添加/替换封面", "提取封面", "移除封面"])
+        
+        file_layout.addWidget(QLabel("操作模式:"), 1, 0)
+        file_layout.addWidget(self.cover_mode_combo, 1, 1)
+        
+        self.cover_image_label = QLabel("封面图片:")
+        self.cover_image_path = QLineEdit()
+        self.cover_image_path.setPlaceholderText("cover.jpg")
+        self.cover_image_btn = QPushButton("选择...")
+        self.cover_image_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.cover_image_path, is_save_dialog=False,
+            file_filter="Image Files (*.jpg *.jpeg *.png *.webp *.avif *.bmp);;All Files (*.*)"))
+        
+        file_layout.addWidget(self.cover_image_label, 2, 0)
+        file_layout.addWidget(self.cover_image_path, 2, 1)
+        file_layout.addWidget(self.cover_image_btn, 2, 2)
+        
+        self.cover_output_label = QLabel("输出文件:")
+        self.cover_output_path = QLineEdit()
+        self.cover_output_path.setPlaceholderText("output.mp4")
+        cover_output_btn = QPushButton("选择...")
+        cover_output_btn.clicked.connect(lambda: self._open_file_dialog(
+            self.cover_output_path, is_save_dialog=True))
+        
+        file_layout.addWidget(self.cover_output_label, 3, 0)
+        file_layout.addWidget(self.cover_output_path, 3, 1)
+        file_layout.addWidget(cover_output_btn, 3, 2)
+        
+        layout.addWidget(file_group)
+        
+        # 命令预览
+        layout.addLayout(self._create_command_preview("cover"))
+        
+        # 执行按钮
+        launch_btn = QPushButton("运行封面 FFmpeg 命令 (foot)")
+        launch_btn.clicked.connect(lambda: self._execute_ffmpeg(
+            self._generate_cover_command(), "FFmpeg 封面操作日志"))
+        launch_btn.setMinimumHeight(35)
+        layout.addWidget(launch_btn)
+        
+        return group
     
     def _bind_events(self):
         """绑定所有输入组件的更改事件"""
@@ -409,7 +661,6 @@ class FFmpegGenerator(QWidget):
         
         # 编码器相关
         self.vcodec_combo.currentTextChanged.connect(self._handle_vcodec_change)
-        self.vcodec_combo.currentTextChanged.connect(self._update_output_path)
         self.vcodec_combo.currentTextChanged.connect(self._update_encoding_preview)
         
         self.acodec_combo.currentTextChanged.connect(self._update_encoding_preview)
@@ -431,6 +682,23 @@ class FFmpegGenerator(QWidget):
         self.vmaf_checkbox.stateChanged.connect(self._update_metrics_preview)
         self.psnr_checkbox.stateChanged.connect(self._update_metrics_preview)
         self.ssim_checkbox.stateChanged.connect(self._update_metrics_preview)
+        
+        # 图片转码相关
+        self.img_input_path.textChanged.connect(self._update_image_preview)
+        self.img_input_path.textChanged.connect(self._update_image_output_path)
+        self.img_output_path.textChanged.connect(self._update_image_preview)
+        self.img_format_combo.currentTextChanged.connect(self._handle_image_format_change)
+        self.img_quality_input.valueChanged.connect(self._update_image_preview)
+        self.img_scale_width.valueChanged.connect(self._update_image_preview)
+        self.img_scale_height.valueChanged.connect(self._update_image_preview)
+        self.img_white_fill.stateChanged.connect(self._update_image_preview)
+        
+        # 视频封面相关
+        self.cover_video_path.textChanged.connect(self._update_cover_preview)
+        self.cover_video_path.textChanged.connect(self._update_cover_output_path)
+        self.cover_mode_combo.currentTextChanged.connect(self._handle_cover_mode_change)
+        self.cover_image_path.textChanged.connect(self._update_cover_preview)
+        self.cover_output_path.textChanged.connect(self._update_cover_preview)
     
     # ===========================
     # 工具方法
@@ -443,24 +711,35 @@ class FFmpegGenerator(QWidget):
         ext = os.path.splitext(path.lower())[1]
         return ext in AUDIO_EXTENSIONS
     
-    def _open_file_dialog(self, line_edit, is_save_dialog=False):
+    def _open_file_dialog(self, line_edit, is_save_dialog=False, file_filter=None):
         """打开文件对话框"""
-        default_filter = ("Video Files (*.mp4 *.mkv *.avi *.webm);;"
-                         "Audio Files (*.mp3 *.aac *.flac *.wav *.m4a);;"
-                         "Subtitle Files (*.srt *.ass *.ssa);;"
-                         "All Files (*.*)")
+        if file_filter is None:
+            file_filter = ("Video Files (*.mp4 *.mkv *.avi *.webm);;"
+                          "Audio Files (*.mp3 *.aac *.flac *.wav *.m4a);;"
+                          "Subtitle Files (*.srt *.ass *.ssa);;"
+                          "All Files (*.*)")
         
         if is_save_dialog:
             path, _ = QFileDialog.getSaveFileName(
-                self, "保存文件为", line_edit.text(), default_filter)
+                self, "保存文件为", line_edit.text(), file_filter)
         else:
             path, _ = QFileDialog.getOpenFileName(
-                self, "选择文件", line_edit.text(), default_filter)
+                self, "选择文件", line_edit.text(), file_filter)
         
         if path:
+            path = os.path.abspath(path)
             line_edit.setText(path)
             if line_edit == self.input_path_input:
                 self._update_output_path(path)
+            if line_edit in [self.img_input_path, self.img_output_path]:
+                self._update_image_preview()
+            if line_edit == self.cover_video_path:
+                self._update_cover_output_path()
+                self._update_cover_preview()
+            if line_edit == self.cover_image_path:
+                self._update_cover_preview()
+            if line_edit == self.cover_output_path:
+                self._update_cover_preview()
     
     def _update_output_path(self, input_path=None):
         """根据输入路径自动生成输出路径"""
@@ -471,7 +750,7 @@ class FFmpegGenerator(QWidget):
             self.output_path_input.setText("output.mp4")
             return
         
-        dir_name = os.path.dirname(input_path)
+        dir_name = os.path.dirname(os.path.abspath(input_path))
         base_name = os.path.splitext(os.path.basename(input_path))[0]
         
         if self._is_audio_file(input_path):
@@ -533,11 +812,28 @@ class FFmpegGenerator(QWidget):
         # VAAPI 设备
         self.vaapi_device_input.setEnabled(is_vaapi)
         
+        # 动态调整 CRF 范围（SVT-AV1 为 0-63，其余为 0-51）
+        if vcodec == "libsvtav1":
+            self.crf_input.setRange(0, 63)
+            self.crf_label.setText("CRF 值 (0-63):")
+        else:
+            self.crf_input.setRange(0, 51)
+            self.crf_label.setText("CRF 值 (0-51):")
+        
+        # 动态调整 VAAPI QP/质量范围
+        if vcodec in VAAPI_QUALITY_CONFIG:
+            qc = VAAPI_QUALITY_CONFIG[vcodec]
+            self.qp_input.setRange(qc["range"][0], qc["range"][1])
+            self.qp_input.setValue(qc["default"])
+        
         # 编码预设
         self._update_preset_options(vcodec, is_software)
         
         # RC 模式
         self._update_rc_mode_options(vcodec, is_vaapi, is_copy)
+        
+        if self.input_path_input.text().strip():
+            self._update_output_path()
     
     def _update_preset_options(self, vcodec, is_software):
         """更新编码预设选项"""
@@ -575,16 +871,12 @@ class FFmpegGenerator(QWidget):
             self.rc_mode_label.setText("VAAPI 码率控制:")
             for label in VAAPI_RC_MODES.keys():
                 self.rc_mode_combo.addItem(label)
-            
-            default_mode = ("ICQ (Intelligent CQ)" if vcodec == "h264_vaapi" 
-                           else "CQP (Constant QP)")
-            if self.rc_mode_combo.findText(default_mode) != -1:
-                self.rc_mode_combo.setCurrentText(default_mode)
+            self.rc_mode_combo.setCurrentIndex(0)
         else:
             self.rc_mode_label.setText("软件码率控制:")
             for label in SW_RC_MODES.keys():
                 self.rc_mode_combo.addItem(label)
-            self.rc_mode_combo.setCurrentText("CRF (Constant Rate Factor)")
+            self.rc_mode_combo.setCurrentIndex(0)
         
         self.rc_mode_combo.blockSignals(False)
         self._handle_rc_mode_change(self.rc_mode_combo.currentText())
@@ -616,6 +908,10 @@ class FFmpegGenerator(QWidget):
             row += 1
         
         if "qp_p" in params or "qp_icq" in params:
+            vcodec = self.vcodec_combo.currentText()
+            qc = VAAPI_QUALITY_CONFIG.get(vcodec, {})
+            label_text = qc.get("label", "QP/ICQ 质量因子 (1-51):")
+            self.qp_label.setText(label_text)
             self.rc_params_layout.addWidget(self.qp_label, row, 0, 
                                            Qt.AlignmentFlag.AlignRight)
             self.rc_params_layout.addWidget(self.qp_input, row, 1, 
@@ -636,49 +932,129 @@ class FFmpegGenerator(QWidget):
         
         self._update_encoding_preview()
     
+    def _handle_image_format_change(self, fmt):
+        """处理图片输出格式变化"""
+        config = IMAGE_QUALITY_CONFIG.get(fmt, {})
+        if config:
+            self.img_quality_label.setText(config["label"])
+            r = config["range"]
+            self.img_quality_input.setRange(r[0], r[1])
+            self.img_quality_input.setValue(config["default"])
+            self.img_quality_label.setVisible(True)
+            self.img_quality_input.setVisible(True)
+        else:
+            self.img_quality_label.setVisible(False)
+            self.img_quality_input.setVisible(False)
+        
+        self.img_white_fill.setVisible(fmt == "JPG")
+        self._update_image_output_path()
+        self._update_image_preview()
+    
+    def _update_image_output_path(self):
+        """根据输入图片路径自动生成输出路径"""
+        input_path = self.img_input_path.text().strip()
+        if not input_path:
+            return
+        
+        dir_name = os.path.dirname(os.path.abspath(input_path))
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        ext = IMAGE_FORMAT_EXT.get(self.img_format_combo.currentText(), ".jpg")
+        output = os.path.join(dir_name, f"{base_name}_converted{ext}")
+        self.img_output_path.setText(output)
+    
+    def _handle_cover_mode_change(self, mode):
+        """处理封面操作模式变化"""
+        is_add = mode == "添加/替换封面"
+        is_extract = mode == "提取封面"
+        
+        self.cover_image_label.setVisible(is_add)
+        self.cover_image_path.setVisible(is_add)
+        self.cover_image_btn.setVisible(is_add)
+        
+        if is_extract:
+            self.cover_output_label.setText("输出图片:")
+        else:
+            self.cover_output_label.setText("输出文件:")
+        
+        self._update_cover_output_path()
+        self._update_cover_preview()
+    
+    def _update_cover_output_path(self):
+        """根据视频路径和操作模式自动生成输出路径"""
+        video_path = self.cover_video_path.text().strip()
+        if not video_path:
+            return
+        
+        dir_name = os.path.dirname(os.path.abspath(video_path))
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        video_ext = os.path.splitext(video_path)[1] or ".mp4"
+        
+        mode = self.cover_mode_combo.currentText()
+        if mode == "提取封面":
+            output = os.path.join(dir_name, f"{base_name}_cover.jpg")
+        elif mode == "移除封面":
+            output = os.path.join(dir_name, f"{base_name}_no_cover{video_ext}")
+        else:
+            output = os.path.join(dir_name, f"{base_name}_with_cover{video_ext}")
+        
+        self.cover_output_path.setText(output)
+    
     # ===========================
     # FFprobe 功能
     # ===========================
     
     def _show_ffprobe_details(self):
-        """显示 ffprobe 详细信息"""
+        """显示媒体文件详细信息（ffprobe + mediainfo）"""
         input_path = self.input_path_input.text().strip()
         
         if not input_path:
             QMessageBox.warning(self, "警告", "请先指定一个输入文件路径。")
             return
         
+        ffprobe_output = ""
+        mediainfo_output = ""
+        
+        # ffprobe
         ffprobe_cmd = [
             "ffprobe", "-v", "quiet", "-print_format", "json",
             "-show_format", "-show_streams", input_path
         ]
-        
         try:
             result = subprocess.run(
-                ffprobe_cmd, capture_output=True, text=True, 
+                ffprobe_cmd, capture_output=True, text=True,
                 check=True, encoding='utf-8'
             )
-            
             try:
                 data = json.loads(result.stdout)
-                formatted_json = json.dumps(data, indent=4, ensure_ascii=False)
+                ffprobe_output = json.dumps(data, indent=4, ensure_ascii=False)
             except json.JSONDecodeError:
-                formatted_json = f"FFprobe 原始输出:\n\n{result.stdout}"
-            
-            dialog = FFprobeDetailsDialog(self)
-            dialog.set_content(formatted_json)
-            dialog.exec()
-            
+                ffprobe_output = f"FFprobe 原始输出:\n\n{result.stdout}"
         except subprocess.CalledProcessError as e:
-            error_msg = f"FFprobe 失败:\n\n{e.stderr.strip()}"
-            QMessageBox.critical(self, "FFprobe 错误", error_msg)
+            ffprobe_output = f"FFprobe 失败:\n\n{e.stderr.strip()}"
         except FileNotFoundError:
-            QMessageBox.critical(
-                self, "执行失败", 
-                "找不到 'ffprobe' 命令。请确保 FFmpeg 已安装。"
-            )
+            ffprobe_output = "找不到 'ffprobe' 命令。请确保 FFmpeg 已安装。"
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"发生意外错误: {e}")
+            ffprobe_output = f"FFprobe 发生意外错误: {e}"
+        
+        # mediainfo
+        try:
+            result = subprocess.run(
+                ["mediainfo", input_path],
+                capture_output=True, text=True, encoding='utf-8'
+            )
+            if result.returncode != 0:
+                mediainfo_output = f"MediaInfo 返回错误 (退出码 {result.returncode}):\n\n{result.stderr.strip() or result.stdout.strip()}"
+            else:
+                mediainfo_output = result.stdout.strip() or "(无输出)"
+        except FileNotFoundError:
+            mediainfo_output = "mediainfo 未安装或不可用。"
+        except Exception as e:
+            mediainfo_output = f"MediaInfo 发生意外错误: {e}"
+        
+        dialog = FFprobeDetailsDialog(self)
+        dialog.set_ffprobe_content(ffprobe_output)
+        dialog.set_mediainfo_content(mediainfo_output)
+        dialog.exec()
     
     # ===========================
     # 命令生成
@@ -686,7 +1062,7 @@ class FFmpegGenerator(QWidget):
     
     def _generate_encoding_command(self):
         """生成 FFmpeg 编码命令"""
-        command = ["ffmpeg", "-hide_banner"]
+        command = ["ffmpeg", "-hide_banner", "-y"]
         
         input_path = self.input_path_input.text().strip()
         extra_input = self.extra_input_input.text().strip()
@@ -747,11 +1123,12 @@ class FFmpegGenerator(QWidget):
         
         # 额外参数
         extra_args = self.extra_args_input.text().strip()
+        self._extra_args_error = None
         if extra_args:
             try:
                 command.extend(shlex.split(extra_args))
             except ValueError:
-                pass
+                self._extra_args_error = extra_args
         
         # 输出文件
         output_path = self.output_path_input.text().strip()
@@ -771,7 +1148,11 @@ class FFmpegGenerator(QWidget):
             
             for param in params:
                 if param in ["qp_p", "qp_icq"]:
-                    command.extend(["-qp", str(self.qp_input.value())])
+                    vcodec = self.vcodec_combo.currentText()
+                    qp_param = VAAPI_QUALITY_CONFIG.get(vcodec, {}).get("param", "-qp")
+                    command.extend([qp_param, str(self.qp_input.value())])
+                    if qp_param == "-q:v":
+                        command.extend(["-qmin", "1", "-qmax", "255"])
                 elif param == "bitrate":
                     bitrate = self.bitrate_input.value()
                     command.extend(["-b:v", f"{bitrate}k"])
@@ -807,7 +1188,11 @@ class FFmpegGenerator(QWidget):
         
         filter_parts = []
         if self.vmaf_checkbox.isChecked():
-            filter_parts.append("libvmaf=log_path=vmaf_log.json:log_fmt=json")
+            log_dir = os.path.dirname(os.path.abspath(dist_path))
+            log_name = os.path.splitext(os.path.basename(dist_path))[0]
+            log_path = os.path.join(log_dir, f"vmaf_{log_name}.json")
+            filter_parts.append(
+                f"libvmaf=log_path='{log_path}':log_fmt=json")
         if self.psnr_checkbox.isChecked():
             filter_parts.append("psnr")
         if self.ssim_checkbox.isChecked():
@@ -826,6 +1211,157 @@ class FFmpegGenerator(QWidget):
             "-f", "null", "-"
         ]
     
+    def _generate_image_command(self):
+        """生成图片转码命令"""
+        command = ["ffmpeg", "-hide_banner", "-y"]
+        
+        input_path = self.img_input_path.text().strip()
+        output_path = self.img_output_path.text().strip()
+        img_format = self.img_format_combo.currentText()
+        
+        if not input_path or not output_path:
+            return ["echo", "错误: 请指定输入和输出图片路径"]
+        
+        command.extend(["-i", input_path])
+        
+        scale_w = self.img_scale_width.value()
+        scale_h = self.img_scale_height.value()
+        has_scale = scale_w > 0 or scale_h > 0
+        use_white_fill = (img_format == "JPG" and 
+                          self.img_white_fill.isChecked())
+        
+        # 构建缩放字符串
+        scale_str = ""
+        if has_scale:
+            if scale_w > 0 and scale_h > 0:
+                scale_str = f"scale={scale_w}:{scale_h}"
+            elif scale_w > 0:
+                scale_str = f"scale={scale_w}:-2"
+            else:
+                scale_str = f"scale=-2:{scale_h}"
+        
+        # 构建滤镜
+        # JPG/AVIF 需要 yuv420p 色彩空间且宽高为偶数
+        yuv_fmt = "format=yuv420p10le" if img_format == "AVIF" else "format=yuv420p"
+        needs_even = img_format in ("JPG", "AVIF")
+        even_pad = ",pad=ceil(iw/2)*2:ceil(ih/2)*2"
+        
+        if use_white_fill:
+            if has_scale:
+                filter_str = (f"[0:v]{scale_str}[s];"
+                             f"[s]split[a][b];"
+                             f"[a]drawbox=c=white:t=fill[bg];"
+                             f"[bg][b]overlay,{yuv_fmt}{even_pad}")
+            else:
+                filter_str = ("[0:v]split[a][b];"
+                             "[a]drawbox=c=white:t=fill[bg];"
+                             f"[bg][b]overlay,{yuv_fmt}{even_pad}")
+            command.extend(["-filter_complex", filter_str])
+        elif has_scale:
+            vf = scale_str
+            if needs_even:
+                vf += f",{yuv_fmt}{even_pad}"
+            command.extend(["-vf", vf])
+        elif needs_even:
+            command.extend(["-vf", f"{yuv_fmt}{even_pad}"])
+        
+        # 格式特定编码参数
+        if img_format == "JPG":
+            command.extend(["-q:v", str(self.img_quality_input.value())])
+        elif img_format == "PNG":
+            command.extend(["-compression_level", 
+                           str(self.img_quality_input.value())])
+        elif img_format == "WebP":
+            command.extend(["-c:v", "libwebp", "-quality",
+                           str(self.img_quality_input.value())])
+        elif img_format == "AVIF":
+            command.extend([
+                "-c:v", "libsvtav1",
+                "-crf", str(self.img_quality_input.value()),
+                "-preset", "6",
+                "-pix_fmt", "yuv420p10le",
+                "-svtav1-params", "keyint=1"
+            ])
+        # BMP / TIFF: 无需编码参数
+        
+        command.append(output_path)
+        return command
+    
+    def _generate_cover_command(self):
+        """生成封面操作命令"""
+        command = ["ffmpeg", "-hide_banner", "-y"]
+
+        video_path = self.cover_video_path.text().strip()
+        cover_path = self.cover_image_path.text().strip()
+        mode = self.cover_mode_combo.currentText()
+        output_path = self.cover_output_path.text().strip()
+        
+        if not video_path:
+            return ["echo", "错误: 请指定视频文件路径"]
+        
+        ext = os.path.splitext(video_path.lower())[1]
+        is_mkv = ext in [".mkv", ".mk3d"]
+        
+        if mode == "添加/替换封面":
+            if not cover_path:
+                return ["echo", "错误: 请指定封面图片路径"]
+            if not output_path:
+                return ["echo", "错误: 请指定输出文件路径"]
+            
+            if is_mkv:
+                command.extend(["-i", video_path])
+                cover_ext = os.path.splitext(cover_path.lower())[1]
+                mime_type = COVER_MIME_MAP.get(cover_ext, "image/jpeg")
+                command.extend([
+                    "-attach", cover_path,
+                    "-metadata:s:t", f"mimetype={mime_type}",
+                    "-metadata:s:t", f"filename=cover{cover_ext}",
+                    "-c", "copy"
+                ])
+            else:
+                command.extend(["-i", video_path, "-i", cover_path])
+                command.extend([
+                    "-map", "0", "-map", "1",
+                    "-c", "copy",
+                    "-disposition:v:1", "attached_pic"
+                ])
+            
+            command.append(output_path)
+        
+        elif mode == "提取封面":
+            if not output_path:
+                return ["echo", "错误: 请指定输出封面图片路径"]
+            
+            if is_mkv:
+                command.extend([
+                    f"-dump_attachment:t:0={output_path}",
+                    "-i", video_path,
+                    "-f", "null", "-"
+                ])
+            else:
+                command.extend([
+                    "-i", video_path, "-map", "0:disp:attached_pic",
+                    "-c", "copy", output_path
+                ])
+        
+        elif mode == "移除封面":
+            if not output_path:
+                return ["echo", "错误: 请指定输出文件路径"]
+            
+            command.extend(["-i", video_path])
+            
+            if is_mkv:
+                command.extend(["-map", "0", "-map", "-0:t?", "-c", "copy"])
+            else:
+                command.extend([
+                    "-map", "0", "-map", "-0:disp:attached_pic",
+                    "-c", "copy"
+                ])
+            
+            command.append(output_path)
+        
+        return command
+    
     # ===========================
     # 预览更新
     # ===========================
@@ -836,6 +1372,9 @@ class FFmpegGenerator(QWidget):
         command_str = " ".join(shlex.quote(p) for p in command_list)
         
         preview_text = f"编码 FFmpeg 命令:\n\n<pre>{command_str}</pre>"
+        if self._extra_args_error:
+            preview_text += ("<br><b style='color:red'>"
+                           "⚠ 额外参数解析失败 (引号不匹配)，已忽略</b>")
         self.encoding_preview_label.setText(preview_text)
         self.encoding_preview_label.setTextFormat(Qt.TextFormat.RichText)
     
@@ -848,6 +1387,24 @@ class FFmpegGenerator(QWidget):
         self.metrics_preview_label.setText(preview_text)
         self.metrics_preview_label.setTextFormat(Qt.TextFormat.RichText)
     
+    def _update_image_preview(self):
+        """更新图片转码命令预览"""
+        command_list = self._generate_image_command()
+        command_str = " ".join(shlex.quote(p) for p in command_list)
+        
+        preview_text = f"图片转码 FFmpeg 命令:\n\n<pre>{command_str}</pre>"
+        self.image_preview_label.setText(preview_text)
+        self.image_preview_label.setTextFormat(Qt.TextFormat.RichText)
+    
+    def _update_cover_preview(self):
+        """更新封面命令预览"""
+        command_list = self._generate_cover_command()
+        command_str = " ".join(shlex.quote(p) for p in command_list)
+        
+        preview_text = f"封面 FFmpeg 命令:\n\n<pre>{command_str}</pre>"
+        self.cover_preview_label.setText(preview_text)
+        self.cover_preview_label.setTextFormat(Qt.TextFormat.RichText)
+    
     # ===========================
     # 命令执行
     # ===========================
@@ -859,6 +1416,23 @@ class FFmpegGenerator(QWidget):
                         else "生成的 FFmpeg 命令不完整。")
             QMessageBox.warning(self, "错误", error_msg)
             return
+        
+        # 检查输出是否覆盖输入文件
+        inputs = set()
+        for i, arg in enumerate(command_list):
+            if arg == "-i" and i + 1 < len(command_list):
+                inputs.add(os.path.abspath(command_list[i + 1]))
+        output = command_list[-1]
+        if output == "-" and len(command_list) > 1:
+            output = command_list[-2]
+        if output and os.path.abspath(output) in inputs:
+            reply = QMessageBox.question(
+                self, "确认覆盖",
+                f"输出文件将覆盖输入文件!\n\n{output}\n\n是否继续?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         
         bash_script = f"""
 echo "--- 正在准备运行 FFmpeg 命令 ---"
@@ -876,7 +1450,7 @@ echo "--- 任务完成 (退出代码: $STATUS) ---"
 if [ $STATUS -ne 0 ]; then
     echo "警告: FFmpeg 运行失败，请检查上方日志。"
 fi
-read -r -p "按任意键退出..."
+read -r -n 1 -p "按任意键退出..."
 """
         
         foot_cmd = [
