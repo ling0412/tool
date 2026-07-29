@@ -49,7 +49,8 @@ VAAPI_QUALITY_CONFIG = {
 AUDIO_EXTENSIONS = ['.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.opus']
 
 IMAGE_INPUT_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.avif',
-                          '.bmp', '.tiff', '.tif', '.gif', '.heic', '.heif']
+                          '.bmp', '.tiff', '.tif', '.gif', '.heic', '.heif',
+                          '.jxl']
 
 OUTPUT_EXTENSIONS = {
     "libx264": ".mp4", "libx265": ".mp4", "libsvtav1": ".mkv",
@@ -58,11 +59,11 @@ OUTPUT_EXTENSIONS = {
     "aac": ".mp3", "libmp3lame": ".mp3", "copy_audio": ".mp3"
 }
 
-IMAGE_FORMATS = ["JPG", "PNG", "WebP", "AVIF", "BMP", "TIFF"]
+IMAGE_FORMATS = ["JPG", "PNG", "WebP", "AVIF", "JXL", "BMP", "TIFF"]
 
 IMAGE_FORMAT_EXT = {
     "JPG": ".jpg", "PNG": ".png", "WebP": ".webp",
-    "AVIF": ".avif", "BMP": ".bmp", "TIFF": ".tiff"
+    "AVIF": ".avif", "JXL": ".jxl", "BMP": ".bmp", "TIFF": ".tiff"
 }
 
 IMAGE_QUALITY_CONFIG = {
@@ -72,8 +73,10 @@ IMAGE_QUALITY_CONFIG = {
              "label": "压缩等级 (0-9, 无损画质, 仅影响体积与速度):"},
     "WebP": {"param": "-quality", "range": (0, 100), "default": 80,
              "label": "质量 (-quality, 0-100, ↑越大越高):"},
-    "AVIF": {"param": "-crf", "range": (0, 63),  "default": 30,
-             "label": "CRF (-crf, 0-63, ↓越小越高):"},
+    "AVIF": {"param": "-q", "range": (0, 100),  "default": 60,
+             "label": "质量 (-q, 0-100, 100=无损, ↑越大越高):"},
+    "JXL":  {"param": "-d", "range": (0, 15), "default": 0,
+             "label": "距离 (-d, 0-15, 0=无损, ↓越小越高):"},
     "BMP":  {},
     "TIFF": {},
 }
@@ -83,6 +86,7 @@ COVER_MIME_MAP = {
     ".png": "image/png",
     ".webp": "image/webp",
     ".avif": "image/avif",
+    ".jxl": "image/jxl",
     ".bmp": "image/bmp",
     ".gif": "image/gif",
     ".tiff": "image/tiff",
@@ -429,7 +433,7 @@ class FFmpegGenerator(QWidget):
             hbox.addWidget(copy_btn, alignment=Qt.AlignmentFlag.AlignTop)
         
         elif preview_type == "image":
-            self.image_preview_label = QLabel("图片转码 FFmpeg 命令:")
+            self.image_preview_label = QLabel("图片转码命令:")
             self.image_preview_label.setFrameShape(QLabel.Shape.StyledPanel)
             self.image_preview_label.setFrameShadow(QLabel.Shadow.Sunken)
             self.image_preview_label.setWordWrap(True)
@@ -1349,17 +1353,26 @@ class FFmpegGenerator(QWidget):
         input_path = self.img_input_path.text().strip()
         output_path = self.img_output_path.text().strip()
         img_format = self.img_format_combo.currentText()
+        self._last_image_output = output_path
         
         if not input_path or not output_path:
             return ["echo", "错误: 请指定输入和输出图片路径"]
-        
-        command.extend(["-i", input_path])
         
         scale_w = self.img_scale_width.value()
         scale_h = self.img_scale_height.value()
         has_scale = scale_w > 0 or scale_h > 0
         use_white_fill = (img_format == "JPG" and 
                           self.img_white_fill.isChecked())
+
+        # AVIF: JPEG/PNG 无缩放 → avifenc 直通
+        if img_format == "AVIF":
+            is_direct = input_path.lower().endswith(('.jpg', '.jpeg', '.png'))
+            if is_direct and not has_scale:
+                return ["avifenc", input_path, output_path,
+                        "-q", str(self.img_quality_input.value()),
+                        "-s", "6"]
+
+        command.extend(["-i", input_path])
         
         # 构建缩放字符串
         scale_str = ""
@@ -1406,13 +1419,26 @@ class FFmpegGenerator(QWidget):
             command.extend(["-c:v", "libwebp", "-quality",
                            str(self.img_quality_input.value())])
         elif img_format == "AVIF":
+            crf = round((100 - self.img_quality_input.value()) * 63 / 100)
             command.extend([
                 "-c:v", "libsvtav1",
-                "-crf", str(self.img_quality_input.value()),
+                "-crf", str(crf),
                 "-preset", "6",
                 "-pix_fmt", "yuv420p10le",
                 "-svtav1-params", "keyint=1"
             ])
+        elif img_format == "JXL":
+            is_jpeg = input_path.lower().endswith(('.jpg', '.jpeg'))
+            if is_jpeg and not has_scale and not use_white_fill:
+                d = self.img_quality_input.value()
+                if d == 0:
+                    return ["cjxl", input_path, output_path,
+                            "-d", "0", "-j", "1"]
+                else:
+                    return ["cjxl", input_path, output_path,
+                            "-d", str(d), "-j", "0"]
+            command.extend(["-c:v", "libjxl", "-distance",
+                            str(self.img_quality_input.value())])
         # BMP / TIFF: 无需编码参数
         
         command.append(output_path)
@@ -1602,9 +1628,12 @@ class FFmpegGenerator(QWidget):
         for i, arg in enumerate(command_list):
             if arg == "-i" and i + 1 < len(command_list):
                 inputs.add(os.path.abspath(command_list[i + 1]))
-        output = command_list[-1]
-        if output == "-" and len(command_list) > 1:
-            output = command_list[-2]
+        if command_list[0] in ("cjxl", "avifenc"):
+            output = self._last_image_output
+        else:
+            output = command_list[-1]
+            if output == "-" and len(command_list) > 1:
+                output = command_list[-2]
         if output and os.path.abspath(output) in inputs:
             reply = QMessageBox.question(
                 self, "确认覆盖",
