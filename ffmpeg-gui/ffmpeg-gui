@@ -15,8 +15,8 @@ from PySide6.QtCore import Qt
 # ===========================
 # 常量定义
 # ===========================
-VIDEO_CODECS = ["libx264", "libx265", "libsvtav1", "h264_vaapi", "hevc_vaapi", 
-                "av1_vaapi", "vp9_vaapi", "copy"]
+VIDEO_CODECS = ["libx264", "libx265", "libsvtav1", "libvpx-vp9", "libwebp", "gif",
+                "h264_vaapi", "hevc_vaapi", "av1_vaapi", "vp9_vaapi", "copy"]
 AUDIO_CODECS = ["aac", "libmp3lame", "libvorbis", "libopus", "flac", "pcm_s16le", "copy"]
 SW_PRESETS = ["medium", "ultrafast", "superfast", "veryfast", "fast", "slow", "veryslow"]
 SVTAV1_PRESETS = {
@@ -24,10 +24,25 @@ SVTAV1_PRESETS = {
     "5": 5, "6": 6, "7": 7, "9": 9, "10": 10, "11": 11, "12 (最慢)": 12
 }
 
+WEBP_PRESETS = {
+    "default (默认)": "default", "none": "none", "picture (图片)": "picture",
+    "photo (照片)": "photo", "drawing (绘图)": "drawing",
+    "icon (图标)": "icon", "text (文本)": "text"
+}
+
+VP9_PRESETS = {
+    "good (推荐)": "good", "best (最佳质量)": "best", "realtime (实时)": "realtime"
+}
+
 SW_RC_MODES = {
     "CRF (Constant Rate Factor|恒定速率因子)": {"rc_mode": "CRF", "params": ["crf"]},
     "CBR (Constant Bitrate|恒定码率)": {"rc_mode": "CBR", "params": ["bitrate"]},
     "VBR (Variable Bitrate|动态码率)": {"rc_mode": "VBR", "params": ["bitrate"]}
+}
+
+WEBP_RC_MODES = {
+    "Lossy (有损|quality)": {"rc_mode": "lossy", "params": ["quality"]},
+    "Lossless (无损)":     {"rc_mode": "lossless", "params": ["quality"]},
 }
 
 VAAPI_RC_MODES = {
@@ -46,18 +61,78 @@ VAAPI_QUALITY_CONFIG = {
     "vp9_vaapi":  {"param": "-q:v",  "range": (0, 255), "default": 30, "label": "质量 (-q:v, 0-255, ↓越小越高):"},
 }
 
+# 编码器行为规格（crf：(min, max, default)）
+CODEC_SPEC = {
+    "libx264": {
+        "ext": ".mp4", "type": "sw",
+        "crf": (0, 51, 23),
+        "presets": SW_PRESETS, "preset_default": "medium",
+        "preset_flag": "-preset", "preset_label": "编码预设 (-preset):",
+        "rc_modes": SW_RC_MODES, "rc_label": "软件码率控制:",
+    },
+    "libx265": {
+        "ext": ".mp4", "type": "sw",
+        "crf": (0, 51, 23),
+        "presets": SW_PRESETS, "preset_default": "medium",
+        "preset_flag": "-preset", "preset_label": "编码预设 (-preset):",
+        "rc_modes": SW_RC_MODES, "rc_label": "软件码率控制:",
+    },
+    "libsvtav1": {
+        "ext": ".mkv", "type": "sw",
+        "crf": (0, 63, 0),
+        "presets": SVTAV1_PRESETS, "preset_default": "8 (均衡)",
+        "preset_flag": "-preset", "preset_num": True,
+        "preset_label": "SVT-AV1 预设 (0-12):",
+        "rc_modes": SW_RC_MODES, "rc_label": "软件码率控制:",
+    },
+    "libvpx-vp9": {
+        "ext": ".webm", "type": "sw",
+        "crf": (0, 63, 31),
+        "presets": VP9_PRESETS, "preset_default": "good (推荐)",
+        "preset_flag": "-deadline", "preset_label": "VP9 编码质量 (-deadline):",
+        "rc_modes": SW_RC_MODES, "rc_label": "软件码率控制:",
+        "crf_extras": [("-b:v", "0")],
+    },
+    "libwebp": {
+        "ext": ".webp", "type": "sw",
+        "crf": (0, 100, 80),
+        "presets": WEBP_PRESETS, "preset_default": "default (默认)",
+        "preset_flag": "-preset", "preset_label": "WebP 预设 (-preset):",
+        "rc_modes": WEBP_RC_MODES, "rc_label": "WebP 编码模式:",
+        "no_audio": True, "loop": True,
+    },
+    "gif": {
+        "ext": ".gif", "type": "sw",
+        "crf": (2, 256, 256), "crf_label": "最大颜色数 (2-256):",
+        "no_audio": True, "loop": True, "palette": True,
+    },
+    "h264_vaapi": {
+        "ext": ".mp4", "type": "vaapi",
+        "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
+    },
+    "hevc_vaapi": {
+        "ext": ".mp4", "type": "vaapi",
+        "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
+    },
+    "av1_vaapi": {
+        "ext": ".mp4", "type": "vaapi",
+        "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
+    },
+    "vp9_vaapi": {
+        "ext": ".webm", "type": "vaapi",
+        "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
+    },
+    "copy": {"ext": ".mp4", "type": "copy"},
+}
+
+# 音频编码器输出扩展名（仅用于纯音频输出）
+_AUDIO_EXT_MAP = {"aac": ".mp3", "libmp3lame": ".mp3", "copy_audio": ".mp3"}
+
 AUDIO_EXTENSIONS = ['.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.opus']
 
 IMAGE_INPUT_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.avif',
                           '.bmp', '.tiff', '.tif', '.gif', '.heic', '.heif',
                           '.jxl']
-
-OUTPUT_EXTENSIONS = {
-    "libx264": ".mp4", "libx265": ".mp4", "libsvtav1": ".mkv",
-    "h264_vaapi": ".mp4", "hevc_vaapi": ".mp4", "av1_vaapi": ".mp4",
-    "vp9_vaapi": ".webm", "copy": ".mp4",
-    "aac": ".mp3", "libmp3lame": ".mp3", "copy_audio": ".mp3"
-}
 
 IMAGE_FORMATS = ["JPG", "PNG", "WebP", "AVIF", "JXL", "BMP", "TIFF"]
 
@@ -150,6 +225,7 @@ class FFmpegGenerator(QWidget):
         self._init_dynamic_widgets()
         
         self._extra_args_error = None
+        self._last_image_output = None
         
         # 构建 UI
         self._init_ui()
@@ -345,7 +421,7 @@ class FFmpegGenerator(QWidget):
         row += 1
         
         # 输出分辨率
-        self.scale_width_label = QLabel("输出分辨率:")
+        self.scale_width_label = QLabel("输出分辨率 (等比缩放):")
         self.scale_width_input = QSpinBox()
         self.scale_width_input.setRange(0, 7680)
         self.scale_width_input.setValue(0)
@@ -369,12 +445,29 @@ class FFmpegGenerator(QWidget):
         layout.addLayout(scale_row, row, 0, 1, 2)
         row += 1
         
+        # 输出帧率
+        self.fps_label = QLabel("输出帧率:")
+        self.fps_input = QSpinBox()
+        self.fps_input.setRange(0, 240)
+        self.fps_input.setValue(0)
+        self.fps_input.setSpecialValueText("原始")
+        self.fps_input.setSuffix(" fps")
+        self.fps_input.setMaximumWidth(100)
+        
+        fps_row = QHBoxLayout()
+        fps_row.addWidget(self.fps_label)
+        fps_row.addWidget(self.fps_input)
+        fps_row.addStretch(1)
+        layout.addLayout(fps_row, row, 0, 1, 2)
+        row += 1
+        
         # 音频编码器
         self.acodec_combo = QComboBox()
         self.acodec_combo.addItems(AUDIO_CODECS)
         self.acodec_combo.setCurrentText("libopus")
         
-        layout.addWidget(QLabel("音频编码器 (-c:a):"), row, 0)
+        self.acodec_label = QLabel("音频编码器 (-c:a):")
+        layout.addWidget(self.acodec_label, row, 0)
         layout.addWidget(self.acodec_combo, row, 1)
         row += 1
         
@@ -385,7 +478,8 @@ class FFmpegGenerator(QWidget):
         self.audio_bitrate_input.setValue(192)
         self.audio_bitrate_input.setMaximumWidth(100)
         
-        layout.addWidget(QLabel("音频比特率 (kbps):"), row, 0)
+        self.audio_bitrate_label = QLabel("音频比特率 (kbps):")
+        layout.addWidget(self.audio_bitrate_label, row, 0)
         layout.addWidget(self.audio_bitrate_input, row, 1, Qt.AlignmentFlag.AlignLeft)
         row += 1
         
@@ -550,7 +644,7 @@ class FFmpegGenerator(QWidget):
         img_input_btn = QPushButton("选择...")
         img_input_btn.clicked.connect(lambda: self._open_file_dialog(
             self.img_input_path, is_save_dialog=False,
-            file_filter="Image Files (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.tiff *.tif *.gif);;All Files (*.*)"))
+            file_filter="Image Files (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.tiff *.tif *.gif *.jxl);;All Files (*.*)"))
         
         file_layout.addWidget(QLabel("输入图片:"), 0, 0)
         file_layout.addWidget(self.img_input_path, 0, 1)
@@ -561,7 +655,7 @@ class FFmpegGenerator(QWidget):
         img_output_btn = QPushButton("选择...")
         img_output_btn.clicked.connect(lambda: self._open_file_dialog(
             self.img_output_path, is_save_dialog=True,
-            file_filter="Image Files (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.tiff);;All Files (*.*)"))
+            file_filter="Image Files (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.tiff *.jxl);;All Files (*.*)"))
         
         file_layout.addWidget(QLabel("输出图片:"), 1, 0)
         file_layout.addWidget(self.img_output_path, 1, 1)
@@ -666,7 +760,7 @@ class FFmpegGenerator(QWidget):
         self.cover_image_btn = QPushButton("选择...")
         self.cover_image_btn.clicked.connect(lambda: self._open_file_dialog(
             self.cover_image_path, is_save_dialog=False,
-            file_filter="Image Files (*.jpg *.jpeg *.png *.webp *.avif *.bmp);;All Files (*.*)"))
+            file_filter="Image Files (*.jpg *.jpeg *.png *.webp *.avif *.bmp *.tiff *.tif *.gif *.heic *.heif *.jxl);;All Files (*.*)"))
         
         file_layout.addWidget(self.cover_image_label, 2, 0)
         file_layout.addWidget(self.cover_image_path, 2, 1)
@@ -767,7 +861,6 @@ class FFmpegGenerator(QWidget):
         
         # 编码器相关
         self.vcodec_combo.currentTextChanged.connect(self._handle_vcodec_change)
-        self.vcodec_combo.currentTextChanged.connect(self._update_encoding_preview)
         
         self.acodec_combo.currentTextChanged.connect(self._update_encoding_preview)
         self.rc_mode_combo.currentTextChanged.connect(self._handle_rc_mode_change)
@@ -781,6 +874,7 @@ class FFmpegGenerator(QWidget):
         self.threads_input.valueChanged.connect(self._update_encoding_preview)
         self.scale_width_input.valueChanged.connect(self._update_encoding_preview)
         self.scale_height_input.valueChanged.connect(self._update_encoding_preview)
+        self.fps_input.valueChanged.connect(self._update_encoding_preview)
         self.audio_bitrate_input.valueChanged.connect(self._update_encoding_preview)
         self.extra_args_input.textChanged.connect(self._update_encoding_preview)
         
@@ -858,10 +952,8 @@ class FFmpegGenerator(QWidget):
                 self._update_cover_preview()
     
     def _update_output_path(self, input_path=None):
-        """根据输入路径自动生成输出路径"""
         if input_path is None:
             input_path = self.input_path_input.text()
-        
         if not input_path:
             self.output_path_input.setText("output.mp4")
             return
@@ -870,12 +962,11 @@ class FFmpegGenerator(QWidget):
         base_name = os.path.splitext(os.path.basename(input_path))[0]
         
         if self._is_audio_file(input_path):
-            target_ext = OUTPUT_EXTENSIONS.get(self.acodec_combo.currentText(), ".mp3")
+            target_ext = _AUDIO_EXT_MAP.get(self.acodec_combo.currentText(), ".mp3")
         else:
-            target_ext = OUTPUT_EXTENSIONS.get(self.vcodec_combo.currentText(), ".mp4")
+            target_ext = CODEC_SPEC.get(self.vcodec_combo.currentText(), {}).get("ext", ".mp4")
         
-        output_path = os.path.join(dir_name, f"{base_name}_encoded{target_ext}")
-        self.output_path_input.setText(output_path)
+        self.output_path_input.setText(os.path.join(dir_name, f"{base_name}_encoded{target_ext}"))
     
     def _copy_command(self, command_list):
         """将命令列表复制到剪贴板"""
@@ -898,6 +989,9 @@ class FFmpegGenerator(QWidget):
         # 控制视频相关选项
         self._set_video_options_enabled(not is_audio_only)
         
+        if path.strip():
+            self._update_output_path(path)
+        
         self._update_encoding_preview()
     
     def _set_video_options_enabled(self, enabled):
@@ -913,116 +1007,143 @@ class FFmpegGenerator(QWidget):
         self.scale_width_label.setEnabled(enabled)
         self.scale_width_input.setEnabled(enabled)
         self.scale_height_input.setEnabled(enabled)
+        self.fps_label.setEnabled(enabled)
+        self.fps_input.setEnabled(enabled)
+        self.vaapi_device_input.setEnabled(enabled)
         
         if not enabled:
-            self.vaapi_device_input.setEnabled(False)
+            self.acodec_combo.setEnabled(True)
+            self.acodec_label.setEnabled(True)
+            self.audio_bitrate_input.setEnabled(True)
+            self.audio_bitrate_label.setEnabled(True)
         else:
             self._handle_vcodec_change(self.vcodec_combo.currentText())
     
     def _handle_vcodec_change(self, vcodec):
-        """处理视频编码器变化"""
         if not self.vcodec_combo.isEnabled():
             return
         
-        is_vaapi = "vaapi" in vcodec
-        is_copy = vcodec == "copy"
-        is_software = not is_vaapi and not is_copy
+        spec = CODEC_SPEC.get(vcodec, {})
+        spec_type = spec.get("type", "")
+        is_vaapi = spec_type == "vaapi"
         
         # VAAPI 设备
         self.vaapi_device_input.setEnabled(is_vaapi)
         
-        # 动态调整 CRF 范围（SVT-AV1 为 0-63，其余为 0-51）
-        if vcodec == "libsvtav1":
-            self.crf_input.setRange(0, 63)
-            self.crf_label.setText("CRF 值 (0-63):")
-        else:
-            self.crf_input.setRange(0, 51)
-            self.crf_label.setText("CRF 值 (0-51):")
+        # 无音频编码器禁用音频控件
+        is_no_audio = spec.get("no_audio", False)
+        self.acodec_combo.setEnabled(not is_no_audio)
+        self.acodec_label.setEnabled(not is_no_audio)
+        self.audio_bitrate_input.setEnabled(not is_no_audio)
+        self.audio_bitrate_label.setEnabled(not is_no_audio)
         
-        # 动态调整 VAAPI QP/质量范围
+        # CRF/质量/颜色范围
+        crf_cfg = spec.get("crf")
+        if crf_cfg:
+            self.crf_input.setRange(crf_cfg[0], crf_cfg[1])
+            self.crf_input.setValue(crf_cfg[2])
+            label = spec.get("crf_label", f"CRF 值 ({crf_cfg[0]}-{crf_cfg[1]}):")
+            self.crf_label.setText(label)
+        
+        # VAAPI QP 范围
         if vcodec in VAAPI_QUALITY_CONFIG:
             qc = VAAPI_QUALITY_CONFIG[vcodec]
             self.qp_input.setRange(qc["range"][0], qc["range"][1])
             self.qp_input.setValue(qc["default"])
         
-        # 编码预设
-        self._update_preset_options(vcodec, is_software)
-        
-        # RC 模式
-        self._update_rc_mode_options(vcodec, is_vaapi, is_copy)
+        self._update_preset_options(vcodec, spec)
+        self._update_rc_mode_options(vcodec, spec)
         
         if self.input_path_input.text().strip():
             self._update_output_path()
     
-    def _update_preset_options(self, vcodec, is_software):
-        """更新编码预设选项"""
+    def _update_preset_options(self, vcodec, spec):
         self.quality_preset_combo.blockSignals(True)
         self.quality_preset_combo.clear()
         
-        self.quality_preset_combo.setEnabled(is_software)
-        self.quality_preset_label.setEnabled(is_software)
+        presets = spec.get("presets")
+        has_presets = presets is not None
         
-        if is_software:
-            if vcodec == "libsvtav1":
-                self.quality_preset_combo.addItems(SVTAV1_PRESETS.keys())
-                self.quality_preset_combo.setCurrentText("8 (均衡)")
-                self.quality_preset_label.setText("SVT-AV1 预设 (0-12):")
-            else:
-                self.quality_preset_combo.addItems(SW_PRESETS)
-                self.quality_preset_combo.setCurrentText("medium")
-                self.quality_preset_label.setText("编码预设 (-preset):")
+        self.quality_preset_combo.setEnabled(has_presets)
+        self.quality_preset_label.setEnabled(has_presets)
+        
+        if has_presets:
+            self.quality_preset_combo.addItems(presets.keys())
+            self.quality_preset_combo.setCurrentText(spec.get("preset_default", ""))
+            self.quality_preset_label.setText(spec.get("preset_label", "编码预设:"))
         else:
-            self.quality_preset_combo.addItem("N/A (非软件编码)")
+            self.quality_preset_combo.addItem("N/A")
         
         self.quality_preset_combo.blockSignals(False)
     
-    def _update_rc_mode_options(self, vcodec, is_vaapi, is_copy):
-        """更新码率控制模式选项"""
+    def _update_rc_mode_options(self, vcodec, spec):
         self.rc_mode_combo.blockSignals(True)
         self.rc_mode_combo.clear()
         
         is_audio = self._is_audio_file(self.input_path_input.text())
-        self.rc_mode_combo.setEnabled(not is_copy and not is_audio)
+        rc_modes = spec.get("rc_modes")
+        has_rc = rc_modes is not None and spec.get("type") != "copy"
         
-        if is_copy:
-            self.rc_mode_combo.addItem("N/A (复制模式)")
-        elif is_vaapi:
-            self.rc_mode_label.setText("VAAPI 码率控制:")
-            for label in VAAPI_RC_MODES.keys():
+        self.rc_mode_combo.setEnabled(has_rc and not is_audio)
+        
+        if has_rc:
+            self.rc_mode_label.setText(spec.get("rc_label", "码率控制:"))
+            for label in rc_modes.keys():
                 self.rc_mode_combo.addItem(label)
             self.rc_mode_combo.setCurrentIndex(0)
         else:
-            self.rc_mode_label.setText("软件码率控制:")
-            for label in SW_RC_MODES.keys():
-                self.rc_mode_combo.addItem(label)
-            self.rc_mode_combo.setCurrentIndex(0)
+            self.rc_mode_combo.addItem("N/A")
         
         self.rc_mode_combo.blockSignals(False)
-        self._handle_rc_mode_change(self.rc_mode_combo.currentText())
+        self._handle_rc_mode_change(self.rc_mode_combo.currentText(), spec)
     
-    def _handle_rc_mode_change(self, mode_label):
-        """处理码率控制模式变化"""
-        # 清除现有控件
+    def _handle_rc_mode_change(self, mode_label, spec=None):
         for i in reversed(range(self.rc_params_layout.count())):
             widget = self.rc_params_layout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
         
-        is_vaapi = "vaapi" in self.vcodec_combo.currentText()
-        mode_data = (VAAPI_RC_MODES.get(mode_label) if is_vaapi 
-                    else SW_RC_MODES.get(mode_label))
+        if spec is None:
+            vcodec = self.vcodec_combo.currentText()
+            spec = CODEC_SPEC.get(vcodec, {})
+        
+        rc_modes = spec.get("rc_modes", {})
+        mode_data = rc_modes.get(mode_label) if rc_modes else None
         
         if not mode_data:
+            if spec.get("palette"):
+                self.crf_label.setText(spec.get("crf_label", "最大颜色数 (2-256):"))
+                self.rc_params_layout.addWidget(self.crf_label, 0, 0,
+                                               Qt.AlignmentFlag.AlignRight)
+                self.rc_params_layout.addWidget(self.crf_input, 0, 1,
+                                               Qt.AlignmentFlag.AlignLeft)
+                self.rc_params_layout.addItem(
+                    QSpacerItem(20, 10, QSizePolicy.Policy.Minimum,
+                               QSizePolicy.Policy.Expanding), 1, 0)
             self._update_encoding_preview()
             return
         
         params = mode_data.get("params", [])
+        rc_mode = mode_data.get("rc_mode", "")
         row = 0
         
         if "crf" in params:
             self.rc_params_layout.addWidget(self.crf_label, row, 0, 
                                            Qt.AlignmentFlag.AlignRight)
             self.rc_params_layout.addWidget(self.crf_input, row, 1, 
+                                           Qt.AlignmentFlag.AlignLeft)
+            row += 1
+        
+        if "quality" in params:
+            if rc_mode == "lossless":
+                self.crf_label.setText("压缩等级 (-quality, 0-100, ↑越慢越小):")
+                self.crf_input.setValue(75)
+            else:
+                self.crf_label.setText("画质 (-quality, 0-100, ↑越高越好):")
+                self.crf_input.setValue(80)
+            self.rc_params_layout.addWidget(self.crf_label, row, 0,
+                                           Qt.AlignmentFlag.AlignRight)
+            self.rc_params_layout.addWidget(self.crf_input, row, 1,
                                            Qt.AlignmentFlag.AlignLeft)
             row += 1
         
@@ -1180,76 +1301,90 @@ class FFmpegGenerator(QWidget):
     # ===========================
     
     def _generate_encoding_command(self):
-        """生成 FFmpeg 编码命令"""
         command = ["ffmpeg", "-hide_banner", "-y"]
         
         input_path = self.input_path_input.text().strip()
         extra_input = self.extra_input_input.text().strip()
         is_audio_only = self._is_audio_file(input_path)
         vcodec = self.vcodec_combo.currentText()
+        spec = CODEC_SPEC.get(vcodec, {})
+        is_vaapi = spec.get("type") == "vaapi"
+        is_no_audio = spec.get("no_audio", False)
+        is_palette = spec.get("palette", False)
         
-        # VAAPI 设备（必须在 -i 之前）
-        vaapi_active = "vaapi" in vcodec and not is_audio_only
+        # VAAPI 设备
+        vaapi_active = is_vaapi and not is_audio_only
         if vaapi_active:
             vaapi_device = self.vaapi_device_input.text().strip()
             if vaapi_device:
                 command.extend(["-vaapi_device", vaapi_device])
         
-        # 主输入文件
+        # 输入文件
         if input_path:
             command.extend(["-i", input_path])
-        
-        # 额外输入文件（字幕等）
         if extra_input:
             command.extend(["-i", extra_input])
         
-        # 视频滤镜（缩放 + VAAPI 上传）
+        # 视频滤镜
         scale_w = self.scale_width_input.value()
         scale_h = self.scale_height_input.value()
         has_scale = scale_w > 0 or scale_h > 0
         
-        vf_parts = []
+        linear_vf = []
         if has_scale:
             if scale_w > 0 and scale_h > 0:
-                vf_parts.append(f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=decrease")
+                linear_vf.append(f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2")
             elif scale_w > 0:
-                vf_parts.append(f"scale={scale_w}:-2")
+                linear_vf.append(f"scale={scale_w}:-2")
             else:
-                vf_parts.append(f"scale=-2:{scale_h}")
+                linear_vf.append(f"scale=-2:{scale_h}")
         
-        if vaapi_active:
-            vf_parts.append("format=nv12,hwupload")
+        fps = self.fps_input.value()
+        if fps > 0:
+            linear_vf.append(f"fps={fps}")
         
-        if vf_parts:
-            command.extend(["-vf", ",".join(vf_parts)])
+        if is_palette:
+            colors = self.crf_input.value()
+            prefix = ",".join(linear_vf)
+            vf_filter = f"{prefix},split[s0][s1];[s0]palettegen=max_colors={colors}[p];[s1][p]paletteuse" if prefix else \
+                       f"split[s0][s1];[s0]palettegen=max_colors={colors}[p];[s1][p]paletteuse"
+            command.extend(["-vf", vf_filter])
+        else:
+            vf_parts = list(linear_vf)
+            if vaapi_active:
+                vf_parts.append("format=nv12,hwupload")
+            if vf_parts:
+                command.extend(["-vf", ",".join(vf_parts)])
         
         # 视频编码参数
-        if not is_audio_only and vcodec != "copy":
+        if not is_audio_only and spec.get("type") != "copy":
             command.extend(["-c:v", vcodec])
             
-            rc_mode_label = self.rc_mode_combo.currentText()
-            is_vaapi = "vaapi" in vcodec
-            mode_data = (VAAPI_RC_MODES.get(rc_mode_label) if is_vaapi 
-                        else SW_RC_MODES.get(rc_mode_label))
+            rc_modes = spec.get("rc_modes", {})
+            mode_data = rc_modes.get(self.rc_mode_combo.currentText()) if rc_modes else None
             
             if mode_data:
-                self._add_rc_params(command, mode_data, is_vaapi)
+                self._add_rc_params(command, spec, mode_data)
             
-            # 编码预设
-            if not is_vaapi:
-                self._add_preset_params(command, vcodec)
+            if spec.get("loop"):
+                command.extend(["-loop", "0"])
+            
+            if spec.get("presets"):
+                self._add_preset_params(command, spec)
         
-        elif vcodec == "copy" and not is_audio_only:
+        elif spec.get("type") == "copy" and not is_audio_only:
             command.extend(["-c:v", "copy"])
         
         # 音频编码参数
-        acodec = self.acodec_combo.currentText()
-        if acodec:
-            command.extend(["-c:a", acodec])
-            
-            audio_bitrate = self.audio_bitrate_input.value()
-            if audio_bitrate > 0 and acodec != "copy":
-                command.extend(["-b:a", f"{audio_bitrate}k"])
+        if is_no_audio and not is_audio_only:
+            command.extend(["-an"])
+        else:
+            acodec = self.acodec_combo.currentText()
+            if acodec:
+                command.extend(["-c:a", acodec])
+                audio_bitrate = self.audio_bitrate_input.value()
+                if audio_bitrate > 0 and acodec != "copy":
+                    command.extend(["-b:a", f"{audio_bitrate}k"])
         
         # 线程数
         threads = self.threads_input.value()
@@ -1261,21 +1396,33 @@ class FFmpegGenerator(QWidget):
         self._extra_args_error = None
         if extra_args:
             try:
-                command.extend(shlex.split(extra_args))
+                parsed = shlex.split(extra_args)
+                if is_no_audio:
+                    filtered = []
+                    i = 0
+                    while i < len(parsed):
+                        arg = parsed[i]
+                        if arg == "-map" and i + 1 < len(parsed) and ":a" in parsed[i+1]:
+                            i += 2
+                            continue
+                        filtered.append(arg)
+                        i += 1
+                    command.extend(filtered)
+                else:
+                    command.extend(parsed)
             except ValueError:
                 self._extra_args_error = extra_args
         
-        # 输出文件
         output_path = self.output_path_input.text().strip()
         if output_path:
             command.append(output_path)
         
         return [part for part in command if part]
     
-    def _add_rc_params(self, command, mode_data, is_vaapi):
-        """添加码率控制参数"""
+    def _add_rc_params(self, command, spec, mode_data):
         rc_mode = mode_data.get("rc_mode", "")
         params = mode_data.get("params", [])
+        is_vaapi = spec.get("type") == "vaapi"
         
         if is_vaapi:
             if rc_mode:
@@ -1287,7 +1434,7 @@ class FFmpegGenerator(QWidget):
                     qp_param = VAAPI_QUALITY_CONFIG.get(vcodec, {}).get("param", "-qp")
                     command.extend([qp_param, str(self.qp_input.value())])
                     if qp_param == "-q:v":
-                        command.extend(["-qmin", "1", "-qmax", "255"])
+                        command.extend(["-qmin", "0", "-qmax", "255"])
                 elif param == "bitrate":
                     bitrate = self.bitrate_input.value()
                     command.extend(["-b:v", f"{bitrate}k"])
@@ -1295,23 +1442,30 @@ class FFmpegGenerator(QWidget):
         else:
             if "crf" in params:
                 command.extend(["-crf", str(self.crf_input.value())])
+                for flag, val in spec.get("crf_extras", []):
+                    command.extend([flag, val])
+            if "quality" in params:
+                command.extend(["-quality", str(self.crf_input.value())])
+            if rc_mode == "lossless":
+                command.extend(["-lossless", "1"])
             if "bitrate" in params:
                 command.extend(["-b:v", f"{self.bitrate_input.value()}k"])
     
-    def _add_preset_params(self, command, vcodec):
-        """添加编码预设参数"""
+    def _add_preset_params(self, command, spec):
         preset_label = self.quality_preset_combo.currentText()
         if not preset_label or "N/A" in preset_label:
             return
         
-        if vcodec == "libsvtav1":
-            preset_value = SVTAV1_PRESETS.get(preset_label)
-            if preset_value is not None:
-                command.extend(["-preset", str(preset_value)])
-            else:
-                command.extend(["-preset", "8"])
+        presets = spec.get("presets", {})
+        preset_value = presets.get(preset_label)
+        if preset_value is None:
+            return
+        
+        flag = spec.get("preset_flag", "-preset")
+        if spec.get("preset_num"):
+            command.extend([flag, str(preset_value)])
         else:
-            command.extend(["-preset", preset_label])
+            command.extend([flag, preset_value])
     
     def _generate_metrics_command(self):
         """生成质量分析命令"""
@@ -1674,7 +1828,7 @@ read -r -n 1 -p "按任意键退出..."
             QMessageBox.critical(
                 self, "执行失败", 
                 f"找不到命令: '{missing_cmd}'。\n"
-                "请确保 foot 和 ffmpeg 已安装。"
+                f"请确保 {missing_cmd} 已安装。"
             )
         except Exception as e:
             QMessageBox.critical(self, "启动失败", f"启动过程中发生错误: {e}")
