@@ -107,22 +107,22 @@ CODEC_SPEC = {
         "no_audio": True, "loop": True, "palette": True,
     },
     "h264_vaapi": {
-        "ext": ".mp4", "type": "vaapi",
+        "ext": ".mkv", "type": "vaapi",
         "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
     },
     "hevc_vaapi": {
-        "ext": ".mp4", "type": "vaapi",
+        "ext": ".mkv", "type": "vaapi",
         "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
     },
     "av1_vaapi": {
-        "ext": ".mp4", "type": "vaapi",
+        "ext": ".mkv", "type": "vaapi",
         "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
     },
     "vp9_vaapi": {
         "ext": ".webm", "type": "vaapi",
         "rc_modes": VAAPI_RC_MODES, "rc_label": "VAAPI 码率控制:",
     },
-    "copy": {"ext": ".mp4", "type": "copy"},
+    "copy": {"ext": ".mkv", "type": "copy"},
 }
 
 # 音频编码器输出扩展名（仅用于纯音频输出）
