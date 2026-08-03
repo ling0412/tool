@@ -717,6 +717,11 @@ class FFmpegGenerator(QWidget):
         self.img_white_fill = QCheckBox("透明区域填充白色 (PNG/WebP → JPG 时建议勾选)")
         layout.addWidget(self.img_white_fill)
         
+        # JXL 输入 → djxl 无损提取
+        self.img_djxl = QCheckBox("使用 djxl 无损提取 (保留原始 JXL 品质)")
+        self.img_djxl.setVisible(False)
+        layout.addWidget(self.img_djxl)
+        
         # 命令预览
         layout.addLayout(self._create_command_preview("image"))
         
@@ -894,6 +899,8 @@ class FFmpegGenerator(QWidget):
         self.img_scale_width.valueChanged.connect(self._update_image_preview)
         self.img_scale_height.valueChanged.connect(self._update_image_preview)
         self.img_white_fill.stateChanged.connect(self._update_image_preview)
+        self.img_djxl.stateChanged.connect(self._update_djxl_visibility)
+        self.img_djxl.stateChanged.connect(self._update_image_preview)
         
         # 视频封面相关
         self.cover_video_path.textChanged.connect(self._update_cover_preview)
@@ -1187,8 +1194,34 @@ class FFmpegGenerator(QWidget):
             self.img_quality_input.setVisible(False)
         
         self.img_white_fill.setVisible(fmt == "JPG")
+        self._update_djxl_visibility()
         self._update_image_output_path()
         self._update_image_preview()
+    
+    def _update_djxl_visibility(self):
+        input_path = self.img_input_path.text().strip()
+        fmt = self.img_format_combo.currentText()
+        has_scale = (self.img_scale_width.value() > 0 or 
+                     self.img_scale_height.value() > 0)
+        
+        is_jxl = input_path.lower().endswith('.jxl')
+        is_png_jpg = fmt in ("PNG", "JPG")
+        show = is_jxl and is_png_jpg and not has_scale
+        
+        self.img_djxl.setVisible(show)
+        if not show:
+            self.img_djxl.setChecked(False)
+        
+        if show and self.img_djxl.isChecked():
+            self.img_quality_label.setVisible(False)
+            self.img_quality_input.setVisible(False)
+            self.img_white_fill.setVisible(False)
+        else:
+            config = IMAGE_QUALITY_CONFIG.get(fmt, {})
+            has_cfg = bool(config)
+            self.img_quality_label.setVisible(has_cfg)
+            self.img_quality_input.setVisible(has_cfg)
+            self.img_white_fill.setVisible(fmt == "JPG")
     
     def _update_image_output_path(self):
         """根据输入图片路径自动生成输出路径"""
@@ -1526,6 +1559,10 @@ class FFmpegGenerator(QWidget):
                         "-q", str(self.img_quality_input.value()),
                         "-s", "6"]
 
+        # JXL 输入 → djxl 无损提取
+        if self.img_djxl.isVisible() and self.img_djxl.isChecked():
+            return ["djxl", input_path, output_path]
+
         command.extend(["-i", input_path])
         
         # 构建缩放字符串
@@ -1582,15 +1619,21 @@ class FFmpegGenerator(QWidget):
                 "-svtav1-params", "keyint=1"
             ])
         elif img_format == "JXL":
-            is_jpeg = input_path.lower().endswith(('.jpg', '.jpeg'))
-            if is_jpeg and not has_scale and not use_white_fill:
+            is_direct = input_path.lower().endswith(
+                ('.jpg', '.jpeg', '.png', '.gif', '.bmp'))
+            if is_direct and not has_scale:
                 d = self.img_quality_input.value()
                 if d == 0:
-                    return ["cjxl", input_path, output_path,
-                            "-d", "0", "-j", "1"]
+                    is_jpeg = input_path.lower().endswith(('.jpg', '.jpeg'))
+                    if is_jpeg:
+                        return ["cjxl", input_path, output_path,
+                                "-d", "0", "-j", "1"]
+                    else:
+                        return ["cjxl", input_path, output_path,
+                                "-d", "0"]
                 else:
                     return ["cjxl", input_path, output_path,
-                            "-d", str(d), "-j", "0"]
+                            "-d", str(d)]
             command.extend(["-c:v", "libjxl", "-distance",
                             str(self.img_quality_input.value())])
         # BMP / TIFF: 无需编码参数
@@ -1782,7 +1825,7 @@ class FFmpegGenerator(QWidget):
         for i, arg in enumerate(command_list):
             if arg == "-i" and i + 1 < len(command_list):
                 inputs.add(os.path.abspath(command_list[i + 1]))
-        if command_list[0] in ("cjxl", "avifenc"):
+        if command_list[0] in ("cjxl", "avifenc", "djxl"):
             output = self._last_image_output
         else:
             output = command_list[-1]
